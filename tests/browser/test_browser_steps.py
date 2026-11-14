@@ -128,7 +128,7 @@ def test_remembered_locator_unfit_for_action_is_treated_as_moved(clean_linus, ma
     browser = make_context("b_sign_in", memory, events).browser
     browser.goto("/user/login")
 
-    target = browser.act(goal, action, "secret" if action is Action.FILL else "", step_id="b_sign_in")
+    target = browser.act(goal, action, "b_sign_in", "secret" if action is Action.FILL else "")
 
     modes = [(d["mode"], d["locator"]) for t, _, d in events.events if t == "locator"]
     print(modes)
@@ -169,6 +169,13 @@ def test_welcome_issue_and_checklist(clean_linus, make_context, gitea):
     assert after.ok, after
     assert events.modes(checklist_goal(first))[0] == "memory"
     assert memory.hints[checklist_goal(first)].source_hire in {HIRE, SEED_SOURCE}
+
+    # The page attaches each LOCATOR event to a step: none may be anonymous, and a tick belongs to its item's step.
+    locator_steps = {d["goal"]: step for t, step, d in events.events if t == "locator"}
+    print(locator_steps)
+    assert None not in locator_steps.values()
+    assert locator_steps[checklist_goal(first)] == "b_add_ssh_key"
+    assert locator_steps[checklist_goal(WELCOME_CHECKLIST["t_run_tests"])] == "b_checklist"
 
     # After a restart (blank tab) the open is still proven: the read state lives in Gitea, not the page.
     ctx.browser.close()
