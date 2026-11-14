@@ -8,6 +8,7 @@ import re
 import pytest
 from bson import ObjectId
 
+from dayone.config import settings
 from dayone.contracts import (
     CheckResult,
     EventType,
@@ -18,7 +19,15 @@ from dayone.contracts import (
     MachineFacts,
     StepKind,
 )
-from dayone.memory.experience import SEMANTIC_MIN_SIMILARITY, LLMResponseError, guard_commands, parse_fix
+from dayone.memory.experience import (
+    MAX_REASONING_ATTEMPTS,
+    REASON_SYSTEM,
+    SEMANTIC_MIN_SIMILARITY,
+    ExperienceMemory,
+    LLMResponseError,
+    guard_commands,
+    parse_fix,
+)
 
 from .conftest import wait_until_searchable
 
@@ -271,6 +280,38 @@ def test_saved_fix_is_the_reasoning_chain_without_a_failed_memory_proposal(harne
     assert not set(wrong) & set(saved["fix_commands"]), "the failed memory proposal is not part of the fix"
 
 
+class FirstReplyUnparseable:
+    """The real model, except its first reply is cut off, as a max_tokens cut-off would leave it."""
+
+    def __init__(self, llm) -> None:
+        self._llm = llm
+        self.calls = 0
+
+    def complete(self, system: str, prompt: str, max_tokens: int) -> str:
+        self.calls += 1
+        if self.calls == 1:
+            return '{"inspect": ["ls"], "commands": ["apt-get upd'
+        return self._llm.complete(system, prompt, max_tokens)
+
+
+def test_unparseable_reply_does_not_use_up_a_tried_attempt(harness, embedder):
+    _, llm, events, gitea, experiences = harness
+    flaky = FirstReplyUnparseable(llm)
+    memory = ExperienceMemory(experiences.database, flaky, embedder, events, gitea, settings())
+    calls: list[FixProposal] = []
+
+    def always_fails(proposal: FixProposal) -> CheckResult:
+        calls.append(proposal)
+        return CheckResult(ok=False, evidence="schema missing", error_text="sqlite3.OperationalError: no such table")
+
+    resolution = memory.resolve(failure("ada", UBUNTU, UBUNTU_PG_CONFIG), always_fails)
+
+    assert resolution.attempts == len(calls) == MAX_REASONING_ATTEMPTS, "ada's t_init_db only got 2 tries"
+    assert resolution.llm_calls == flaky.calls == MAX_REASONING_ATTEMPTS + 1
+    assert "rejected, nothing ran" in llm.prompts[0]
+    assert ".venv/bin/pip" in REASON_SYSTEM
+
+
 def test_close_loop_opens_one_issue_per_repeated_fix_and_is_idempotent(harness):
     memory, _, events, gitea, experiences = harness
     save_ada_ubuntu_fix(memory, [])
@@ -324,6 +365,8 @@ def test_guard_makes_model_commands_runnable_unattended():
     )
     assert inspect == ("grep -rn init . || true",), "a grep with no match must not abort the attempt"
     assert commands == ("apt-get update",) and rationale == "refresh"
+    inspect, _, _ = parse_fix(r"""{"inspect": ["grep -rn 'init_db\|schema' ."], "commands": ["true"]}""")
+    assert inspect == (r"grep -rn 'init_db\|schema' . || true",), "an undoubled backslash is kept literally"
     for reply in (
         "no json here",
         '{"commands": "apt-get update"}',
