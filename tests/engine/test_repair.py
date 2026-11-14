@@ -8,6 +8,7 @@ from pathlib import Path
 from playwright.sync_api import Error as PlaywrightError
 
 from dayone.contracts import (
+    WELCOME_CHECKLIST,
     CheckResult,
     EventType,
     FixProposal,
@@ -56,7 +57,8 @@ def test_failure_is_fixed_from_memory_and_verified(store: AtlasStore, tmp_path: 
             FixProposal(commands=(FIX_COMMAND,), source=FixSource.SEMANTIC_MEMORY, rationale="apt", experience_id="e1"),
         ]
     )
-    opener = parts_opener(store, [needs_fix_step(tmp_path, executor)], FakeGitea(), memory, FakeBrowser(), executor)
+    browser = FakeBrowser()
+    opener = parts_opener(store, [needs_fix_step(tmp_path, executor)], FakeGitea(), memory, browser, executor)
     assert drive(store, "fixer", Machine.UBUNTU, False, opener)
 
     (failure,) = memory.failures
@@ -69,7 +71,24 @@ def test_failure_is_fixed_from_memory_and_verified(store: AtlasStore, tmp_path: 
     doc = store.db["steps"].find_one({"hire": "fixer", "step_id": STEP_ID})
     assert doc["check_ever_failed"] and not doc["untrusted"]
     assert doc["llm_calls"] == 0
+    assert browser.ticked == [WELCOME_CHECKLIST[STEP_ID]], "the Welcome item is ticked as soon as its step passes"
     print("executor commands:", executor.commands)
+
+
+def test_test_suite_item_is_left_for_b_checklist(store: AtlasStore, tmp_path: Path) -> None:
+    # b_checklist's check must fail before its run, so the engine never ticks the item of the step just before it.
+    marker = tmp_path / "tests.done"
+    step = Step(
+        id="t_run_tests",
+        kind=StepKind.TERMINAL,
+        title="tests",
+        check=lambda context: CheckResult(ok=marker.exists(), evidence="pytest", error_text="" if marker.exists() else "failed"),
+        run=lambda context: marker.touch() or RunResult(ok=True, output="13 passed"),
+    )
+    browser = FakeBrowser()
+    assert drive(store, "tester", Machine.UBUNTU, False, parts_opener(store, [step], FakeGitea(), FakeMemory(), browser, FakeExecutor()))
+    print("ticked:", browser.ticked)
+    assert browser.ticked == []
 
 
 def test_unfixable_step_fails_the_run(store: AtlasStore, tmp_path: Path) -> None:

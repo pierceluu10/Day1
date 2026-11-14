@@ -166,6 +166,9 @@ WELCOME_CHECKLIST: dict[str, str] = {
     "t_init_db": "Initialise the local database",
     "t_run_tests": "Run the test suite and see it pass",
 }
+# The engine ticks each of these as its step passes, so the issue fills in alongside the terminal. b_checklist
+# ticks the rest: the test-suite item, whose step runs just before it, so its check still fails before its run.
+ENGINE_TICKED_ITEMS = frozenset(WELCOME_CHECKLIST) - {"t_run_tests"}
 
 # --- Memory -------------------------------------------------------------------
 
@@ -270,6 +273,7 @@ class Executor(Protocol):
 class BrowserSession(Protocol):
     """One headed Chromium per run, overlay injected. Browser steps get the page through the concrete class."""
 
+    def tick_item(self, item: str, step_id: str) -> None: ...
     def close(self) -> None: ...
 
 
