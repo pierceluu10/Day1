@@ -25,6 +25,14 @@ FACT_TOOLS = {
 VERSION = re.compile(r"\d+(?:\.\d+)+\w*")
 PACKAGE_MANAGERS = {"alpine": "apk", "ubuntu": "apt", "debian": "apt"}
 FACT_MARKER = "@@dayone-fact "
+ERROR_TAIL_LINES = 40
+
+
+def error_text(result: ExecResult, workdir: str | None = None, message: str = "") -> str:
+    """What a failing check hands memory: the exact command first (fixes must reproduce its context), then output."""
+    command = f"$ cd {workdir} && {result.command}" if workdir else f"$ {result.command}"
+    output = "\n".join(result.output.strip().splitlines()[-ERROR_TAIL_LINES:])
+    return "\n".join(part for part in (command, output, message) if part)
 
 
 class DockerError(RuntimeError):

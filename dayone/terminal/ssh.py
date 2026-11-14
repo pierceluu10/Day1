@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 
 from dayone.contracts import GITEA_HOSTNAME, CheckResult, StepContext
+from dayone.terminal.docker import error_text
 
 SSH_OPTIONS = "-o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=10"
 SSH_TIMEOUT_S = 60.0
@@ -17,5 +18,5 @@ def ssh_auth_ok(ctx: StepContext) -> CheckResult:
     match = SSH_AUTHENTICATED.search(result.output)
     if match is None or match["user"] != ctx.hire.name:
         detail = {"exit_code": result.exit_code}
-        return CheckResult(False, "ssh -T: not authenticated", detail, result.output.strip())
+        return CheckResult(False, "ssh -T: not authenticated", detail, error_text(result))
     return CheckResult(True, f"ssh -T: authenticated as {match['user']}", {"ssh_user": match["user"]})
