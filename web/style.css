@@ -226,7 +226,8 @@ h2 { font-size: 1.375rem; font-weight: 700; letter-spacing: -0.01em; }
 .step[data-changed][data-status="stale"], .step[data-changed][data-status="failed"] { background: var(--stale-wash); }
 
 .compare { display: grid; gap: 0.125rem; font-size: 0.9375rem; }
-.compare p:first-child { color: var(--muted); }
+.compare p { color: var(--muted); }
+.compare p[data-current] { color: var(--ink); }
 .compare strong { font-weight: 600; color: var(--ink); }
 
 .terminal {

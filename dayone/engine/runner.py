@@ -49,6 +49,7 @@ from dayone.contracts import (
     container_name,
     idempotency_key,
 )
+from dayone.gitea import GiteaError, GiteaUnreachable
 from dayone.memory.experience import FIX_OUTPUT
 from dayone.store.atlas import AtlasStore
 
@@ -241,19 +242,26 @@ class Run:
         self.parts.executor.ensure_container()
         ok = self._converge()
         self.store.finish_hire(self.hire.name, ok)
-        self.events.emit(EventType.RUN_FINISHED if ok else EventType.RUN_FAILED)
+        if ok:
+            self.events.emit(EventType.RUN_FINISHED, **self._close_loop())
+        else:
+            self.events.emit(EventType.RUN_FAILED)
         return ok
+
+    def _close_loop(self) -> dict[str, object]:
+        """Propose README changes for fixes 2+ hires needed. A side effect of a green run, never a reason to fail it."""
+        try:
+            return {"readme_issues": self.parts.memory.close_loop()}
+        except (GiteaError, GiteaUnreachable) as error:
+            log.warning("could not open README issues for %s", self.hire.name, exc_info=error)
+            return {"readme_issues": [], "close_loop_error": f"{type(error).__name__}: {error}"}
 
     def _converge(self) -> bool:
         for _ in range(MAX_PASSES):
             if not self._reconcile_pass():
                 return False
-            drifted = self._confirm_pass()
-            if drifted is None:
+            if self._confirm_pass():
                 return True
-            reason = f"{drifted} no longer passes its check"
-            self.events.emit(EventType.DRIFT_DETECTED, drifted, reason=reason)  # the step is the event's step_id
-            self._mark_stale_from(drifted, reason)
         raise DriftUnsettled(f"{self.hire.name}: steps kept drifting for {MAX_PASSES} passes")
 
     def _reconcile_pass(self) -> bool:
@@ -274,14 +282,22 @@ class Run:
             index += 1
         return True
 
-    def _confirm_pass(self) -> str | None:
-        """Re-check every step; the first that no longer passes is drift. None when everything still holds."""
+    def _confirm_pass(self) -> bool:
+        """Re-check every step; the first that no longer passes is drift. True when everything still holds."""
         for step in self.parts.steps:
             self.lease.ensure()
             self.events.emit(EventType.STEP_CHECKING, step.id, confirm=True)
-            if not self._check(step).ok:
-                return step.id
-        return None
+            check = self._check(step)
+            if not check.ok:
+                self._regressed(step, check)
+                return False
+        return True
+
+    def _regressed(self, step: Step, check: CheckResult) -> None:
+        """A step that was done no longer passes: drift. It and everything after it must be re-verified."""
+        reason = f"{step.id} no longer passes its check: {check.evidence}"
+        self.events.emit(EventType.DRIFT_DETECTED, step.id, reason=reason)  # the step is the event's step_id
+        self._mark_stale_from(step.id, reason)
 
     def _head_moved(self, step: Step) -> bool:
         """Drift probe (Track 3 question 3): before each step after t_clone, has the remote branch moved?"""
@@ -322,6 +338,10 @@ class Run:
                 self._finish(step, StepStatus.SKIPPED, check, None, reconciled=True)
             return True
 
+        if previous is not None and previous.status in DONE_STATUSES:
+            # Changed while no runner was watching (e.g. a push while the agent was dead): the clone_head
+            # probe cannot see it in a fresh process, so the failing check is what reports it.
+            self._regressed(step, check)
         self._intend(step)
         ran, raised = self._run(step)
         check = self._check(step)

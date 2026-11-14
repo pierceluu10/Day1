@@ -53,7 +53,7 @@ const view = {
   steps: new Map(), // step_id -> ledger doc
   notes: new Map(), // step_id -> { text, kind }
   checking: new Set(),
-  reconciled: new Set(), // settled by its check this pass, nothing run; the ledger keeps the earlier status
+  reconciled: new Set(), // settled by its check in the current resume pass, nothing run; cleared when the run ends
   notices: [], // { text, kind }: resume, drift and README lines for this run, oldest first
   running: false,
   summary: null,
@@ -77,11 +77,15 @@ function formatDuration(seconds) {
   return minutes ? `${minutes}m ${rest}s` : `${total}s`;
 }
 
-function formatTime(iso) {
-  return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-}
-
 const recordedEarlier = (summary) => summary?.finished_at && new Date(summary.finished_at) < pageLoadedAt;
+
+// "earlier today at 1:23 PM", or "on Nov 13 at 1:23 PM" for a run from another day.
+function whenFinished(iso) {
+  const finished = new Date(iso);
+  const time = finished.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  if (finished.toDateString() === pageLoadedAt.toDateString()) return `earlier today at ${time}`;
+  return `on ${finished.toLocaleDateString([], { month: "short", day: "numeric" })} at ${time}`;
+}
 
 function plural(count, word) {
   return `${count} ${word}${count === 1 ? "" : "s"}`;
@@ -175,7 +179,7 @@ function renderRunHead() {
   if (recordedEarlier(summary)) {
     const label = document.createElement("span");
     label.className = "recorded";
-    label.textContent = `, recorded earlier today at ${formatTime(summary.finished_at)}`;
+    label.textContent = `, ${whenFinished(summary.finished_at)}`;
     state.append(label);
   }
   $("resume").hidden = !summary || Boolean(summary.finished_at) || view.running;
@@ -190,26 +194,28 @@ function renderRunHead() {
 
 function comparisonLine(summary, label) {
   const line = document.createElement("p");
+  line.toggleAttribute("data-current", summary.hire === view.hire);
   const name = document.createElement("strong");
   name.textContent = label;
   const machine = summary.machine ? ` (${summary.machine})` : "";
+  let outcome = "";
+  if (!summary.finished_at) outcome = ", not finished";
+  else if (!summary.ok) outcome = ", failed";
+  else if (recordedEarlier(summary) && summary.hire !== view.hire) outcome = `, finished ${whenFinished(summary.finished_at)}`;
   line.append(
     name,
     `${machine}: ${formatDuration(summary.elapsed_s)}, ${plural(summary.errors, "error")}, ` +
-      `${summary.fixes_from_memory} from memory, ${plural(summary.llm_calls, "LLM call")}` +
-      (recordedEarlier(summary) && label !== view.hire ? ", recorded earlier" : ""),
+      `${summary.fixes_from_memory} from memory, ${plural(summary.llm_calls, "LLM call")}${outcome}`,
   );
   return line;
 }
 
-function renderCompare(comparison) {
-  const section = $("compare");
-  const lines = [];
-  if (comparison.first) lines.push(comparisonLine(comparison.first, `${comparison.first.hire}, hire 1`));
-  if (comparison.current && comparison.current.run_id !== comparison.first?.run_id) {
-    lines.push(comparisonLine(comparison.current, comparison.current.hire));
-  }
-  section.replaceChildren(...lines);
+// Every hire's latest run, oldest first. Hire 1 is the run that finished successfully first.
+function renderCompare(hires) {
+  const first = hires
+    .filter((summary) => summary.ok)
+    .reduce((earliest, summary) => (!earliest || new Date(summary.finished_at) < new Date(earliest.finished_at) ? summary : earliest), null);
+  $("compare").replaceChildren(...hires.map((summary) => comparisonLine(summary, summary === first ? `${summary.hire}, hire 1` : summary.hire)));
 }
 
 function appendTerminal(command, chunk) {
@@ -268,20 +274,18 @@ const refreshSteps = coalesced(async (hire) => {
   renderRunHead();
 });
 
-const refreshCompare = coalesced(async (hire) => {
-  const comparison = await getJSON(`/api/compare/${hire}`);
+// The hire list feeds the nav, this run's head line and the comparison: one query for all three.
+const refreshHires = coalesced(async (hire) => {
+  const hires = await getJSON("/api/hires");
+  renderHires(hires);
   if (hire !== view.hire) return;
-  view.summary = comparison.current;
+  view.summary = hires.find((summary) => summary.hire === hire) ?? null;
   renderRunHead();
-  renderCompare(comparison);
+  renderCompare(hires);
 });
 
 function refresh() {
-  return Promise.all([refreshSteps(), refreshCompare()]);
-}
-
-async function refreshHires() {
-  renderHires(await getJSON("/api/hires"));
+  return Promise.all([refreshSteps(), refreshHires()]);
 }
 
 function scheduleRefresh() {
@@ -291,6 +295,13 @@ function scheduleRefresh() {
 
 function setNote(stepId, text, kind) {
   if (stepId) view.notes.set(stepId, { text, kind });
+}
+
+// The browser also locates elements for a step that is already done (ticking its checklist box); that must not
+// hide how the step was fixed.
+function setLocatorNote(stepId, text, kind) {
+  const current = view.notes.get(stepId);
+  if (!current || TRANSIENT_NOTES.has(current.kind)) setNote(stepId, text, kind);
 }
 
 function memoryNote(data) {
@@ -311,6 +322,11 @@ function applyEvent(event) {
       view.notices = [];
       view.reconciled.clear();
       resetTerminal();
+      break;
+    case "run_finished":
+    case "run_failed":
+      // "Skipped, not re-run" tells the story of a resume pass; once it is over the ledger's status says more.
+      view.reconciled.clear();
       break;
     case "run_resumed":
       view.reconciled.clear();
@@ -337,7 +353,7 @@ function applyEvent(event) {
       break;
     case "reasoning_started":
       // The browser reasons about a page element (data.goal); memory reasons about a failed step.
-      if (data.goal) setNote(stepId, `${data.goal}: finding it by reasoning`, "locating");
+      if (data.goal) setLocatorNote(stepId, `${data.goal}: finding it by reasoning`, "locating");
       else setNote(stepId, "no fix in memory, reasoning", "reasoning");
       break;
     case "fix_attempt":
@@ -358,9 +374,9 @@ function applyEvent(event) {
       }
       break;
     case "locator":
-      if (data.mode === "memory") setNote(stepId, `${data.goal}: locator from memory`, "locator");
-      else if (data.mode === "moved") setNote(stepId, `This moved. Saved locator for ${data.goal} failed`, "moved");
-      else setNote(stepId, `${data.goal}: finding it by reasoning`, "locating");
+      if (data.mode === "memory") setLocatorNote(stepId, `${data.goal}: locator from memory`, "locator");
+      else if (data.mode === "moved") setLocatorNote(stepId, `This moved. Saved locator for ${data.goal} failed`, "moved");
+      else setLocatorNote(stepId, `${data.goal}: finding it by reasoning`, "locating");
       break;
     case "readme_issue_opened":
       view.notices.push({ text: `Opened a README issue: ${data.title ?? data.url}`, kind: "readme" });
@@ -371,7 +387,6 @@ function applyEvent(event) {
       appendTerminal(data.command, data.chunk);
       return;
   }
-  if (type.startsWith("run_")) refreshHires().catch(showError);
   if (LEDGER_EVENTS.has(type)) scheduleRefresh();
   else renderSteps(true);
   renderRunHead();
@@ -401,7 +416,6 @@ function watch(hire) {
   });
   view.source = source;
   refresh().catch(showError);
-  refreshHires().catch(showError);
 }
 
 function showError(error) {

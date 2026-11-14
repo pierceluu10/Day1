@@ -1,3 +1,6 @@
+$ cd /root/acme-api && /root/acme-api/.venv/bin/python -c 'from acme_api import db
+with db.connection() as conn:
+    print(db.execute(conn, "SELECT count(*) FROM users").fetchone()[0])'
 Traceback (most recent call last):
   File "<string>", line 3, in <module>
   File "/root/acme-api/acme_api/db.py", line 59, in execute

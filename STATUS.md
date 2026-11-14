@@ -63,6 +63,8 @@ Updated 13:57.
 
 Fixed since 13:25: memory adapts across OSes, not just across package managers (3616578); reset removes the container by name (c87bacd); dev tests use Gitea users dev3/dev4 and their own containers (6500679, 0a8397b, 61c3b9e).
 
-Running: linus (hire 3, ubuntu), expected exact matches with 0 LLM calls, which should open the README issue.
+**Linus (hire 3, ubuntu)**: green 13:59. 2m 55s, 4 errors, 4 fixed from memory (t_runtime same-machine semantic, t_init_db exact: 0 LLM calls; t_system_package and t_settings picked grace's debian experience and adapted it back: 2 needless LLM calls, fix with session 5). Tests 13/13 at 2955521 (QA's drift commit moved shared main; to restore before 15:15).
+
+Open: engine never calls close_loop(), so no README issue yet (session 2); drift during a crash not reported (session 2); orphaned in-container processes after kill -9 (session 3); same-machine preference in semantic memory (session 5).
 
 Next: barbara live rehearsal (kill -9, resume, push_change); ken on alpine; QA acceptance report; page check; README/DEMO numbers.

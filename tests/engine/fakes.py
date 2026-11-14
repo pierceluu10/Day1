@@ -127,6 +127,9 @@ class FakeMemory:
 
     fixes: list[FixProposal] = field(default_factory=list)
     failures: list[Failure] = field(default_factory=list)
+    issue_urls: list[str] = field(default_factory=list)
+    close_loop_error: Exception | None = None
+    close_loop_calls: int = 0
 
     def resolve(self, failure: Failure, try_fix: Callable[[FixProposal], CheckResult]) -> Resolution:
         self.failures.append(failure)
@@ -144,7 +147,10 @@ class FakeMemory:
         pass
 
     def close_loop(self) -> list[str]:
-        return []
+        self.close_loop_calls += 1
+        if self.close_loop_error is not None:
+            raise self.close_loop_error
+        return self.issue_urls
 
 
 def fake_fingerprint(error_text: str) -> str:
