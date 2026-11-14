@@ -1,4 +1,5 @@
-"""Live fixtures: the real Gitea (dev user dev4, seeded like a hire), a real ubuntu container, real Claude; memory and events are in-test fakes."""
+"""Live fixtures: the real Gitea (dev user dev4, seeded like a hire), a real ubuntu container, real Claude, and
+either in-test fake memory and events or, through AtlasRunner, the real Atlas memory and event bus (dev DB)."""
 
 from __future__ import annotations
 
@@ -6,14 +7,18 @@ import dataclasses
 import shutil
 import subprocess
 import time
+import uuid
 from typing import Any
 
-import anthropic
 import pytest
+from pymongo import MongoClient
+from pymongo.database import Database
 
 from dayone.browser.session import PROFILE_DIR, PlaywrightSession
 from dayone.config import STATE_DIR, settings
 from dayone.contracts import (
+    CheckResult,
+    EventType,
     DOCKER_NETWORK,
     MACHINE_IMAGES,
     REPO_DIR,
@@ -26,6 +31,11 @@ from dayone.contracts import (
     idempotency_key,
 )
 from dayone.gitea import GiteaClient
+from dayone.llm.anthropic import AnthropicLLM
+from dayone.llm.voyage import VoyageEmbedder
+from dayone.memory.experience import ExperienceMemory
+from dayone.steps.browser_steps import BROWSER_STEPS
+from dayone.store.events import AtlasEventBus
 from scripts.seed import TEAM, ensure_hire, ensure_team
 
 HIRE = "dev4"  # session 4's own Gitea user and container; the five demo hires are never touched
@@ -81,22 +91,43 @@ class DictMemory:
         self.hints[hint.goal] = dataclasses.replace(hint, source_hire=hire)
 
 
-class ClaudeLLM:
-    """Real model, direct SDK call, standing in for dayone.llm.anthropic.AnthropicLLM until it merges."""
+class CountingLLM(AnthropicLLM):
+    """The real model, recording every prompt so tests can count reasoning calls."""
 
     def __init__(self):
-        self.client = anthropic.Anthropic(api_key=settings().anthropic_api_key, timeout=settings().llm_timeout_s)
+        super().__init__(settings())
         self.prompts: list[str] = []
 
     def complete(self, system: str, prompt: str, max_tokens: int) -> str:
         self.prompts.append(prompt)
-        reply = self.client.messages.create(
-            model=settings().llm_model, system=system, max_tokens=max_tokens,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        text = "".join(block.text for block in reply.content if block.type == "text")
-        print("LLM ->", text)
-        return text
+        reply = super().complete(system, prompt, max_tokens)
+        print("LLM ->", reply)
+        return reply
+
+
+def reconcile(step_id: str, ctx: StepContext) -> tuple[CheckResult, CheckResult]:
+    """What the engine does: check, run, check. Returns (check before, check after)."""
+    step = BROWSER_STEPS[step_id]
+    before = step.check(ctx)
+    print(step_id, "before:", before)
+    assert not before.ok, f"{step_id} check passed before run: it cannot tell done from not done"
+    run = step.run(ctx)
+    print(step_id, "run:", run)
+    after = step.check(ctx)
+    print(step_id, "after:", after)
+    return before, after
+
+
+def reset_dev_hire(gitea: GiteaClient, container: str) -> None:
+    """The dev hire with no keys, an unticked unread Welcome issue, no browser profile, and no clone."""
+    gitea.reset_hire(HIRE)
+    shutil.rmtree(PROFILE_DIR / HIRE, ignore_errors=True)
+    DockerExec(container).exec(f"rm -rf {REPO_DIR} ~/.ssh/known_hosts", 30)
+
+
+def locator_events(db: Database, run_id: str, goal: str) -> list[dict[str, Any]]:
+    query = {"hire": HIRE, "run_id": run_id, "type": EventType.LOCATOR.value, "data.goal": goal}
+    return [event["data"] for event in db["events"].find(query).sort([("ts", 1), ("seq", 1)])]
 
 
 @pytest.fixture(scope="session")
@@ -131,17 +162,14 @@ def dev_hire(gitea) -> str:
 
 @pytest.fixture
 def clean_hire(dev_hire, gitea, container):
-    """The dev hire with no keys, an unticked unread Welcome issue, no browser profile, and no clone."""
-    gitea.reset_hire(dev_hire)
-    shutil.rmtree(PROFILE_DIR / dev_hire, ignore_errors=True)
-    DockerExec(container).exec(f"rm -rf {REPO_DIR} ~/.ssh/known_hosts", 30)
+    reset_dev_hire(gitea, container)
 
 
 @pytest.fixture
 def make_context(gitea, container):
     sessions: list[PlaywrightSession] = []
 
-    def make(step_id: str, memory: DictMemory, events: RecordingEvents, llm: ClaudeLLM | None = None) -> StepContext:
+    def make(step_id: str, memory: DictMemory, events: RecordingEvents, llm: CountingLLM | None = None) -> StepContext:
         hire = Hire(HIRE, Machine.UBUNTU, container, "test-run")
         browser = PlaywrightSession(hire, dataclasses.replace(settings(), browser_headless=True), events, memory, llm)
         sessions.append(browser)
@@ -175,3 +203,55 @@ def screenshots(request):
         return taken
 
     return install
+
+
+@pytest.fixture(scope="session")
+def db():
+    client = MongoClient(settings().mongodb_uri, tz_aware=True)  # as AtlasStore does; AtlasEventBus compares aware ts
+    assert settings().mongodb_db.startswith("dayone_dev_"), "these tests write locators; never run them on the demo DB"
+    yield client[settings().mongodb_db]
+    client.close()
+
+
+@pytest.fixture(scope="session")
+def atlas_memory(db, gitea):
+    memory = ExperienceMemory(db, AnthropicLLM(settings()), VoyageEmbedder(settings()), RecordingEvents(), gitea, settings())
+    memory.ensure_indexes()
+    return memory
+
+
+class AtlasRunner:
+    """Runs b_sign_in + b_add_ssh_key as one hire run on the real stack: Atlas memory and events, real Claude."""
+
+    def __init__(self, db, memory, gitea, container, screenshots):
+        self.db, self.memory, self.gitea, self.container = db, memory, gitea, container
+        self.install_screenshots = screenshots
+        self.llm = CountingLLM()
+        self.shots: list[str] = []
+        self.durations_s: list[float] = []
+
+    def run(self, headless: bool = True, init_script: str | None = None) -> str:
+        run_id = f"dev-{uuid.uuid4().hex[:8]}"
+        hire = Hire(HIRE, Machine.UBUNTU, self.container, run_id)
+        events = AtlasEventBus(self.db, hire)
+        browser = PlaywrightSession(hire, dataclasses.replace(settings(), browser_headless=headless), events, self.memory, self.llm)
+        started = time.monotonic()
+        try:
+            if init_script:
+                browser.page.context.add_init_script(init_script)
+            self.shots = self.install_screenshots(browser)  # one list shared by every browser in the test
+            ctx = StepContext(hire, "", "", DockerExec(self.container), browser, self.gitea, events, self.memory)
+            for step_id in ("b_sign_in", "b_add_ssh_key"):
+                ctx.step_id, ctx.idempotency_key = step_id, idempotency_key(HIRE, step_id)
+                _, after = reconcile(step_id, ctx)
+                assert after.ok, after
+        finally:
+            browser.close()
+            events.close()
+        self.durations_s.append(time.monotonic() - started)
+        return run_id
+
+
+@pytest.fixture
+def atlas_runner(db, atlas_memory, gitea, container, screenshots):
+    return AtlasRunner(db, atlas_memory, gitea, container, screenshots)
