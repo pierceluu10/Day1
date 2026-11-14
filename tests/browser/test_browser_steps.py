@@ -145,37 +145,29 @@ def test_welcome_issue_and_checklist(clean_hire, make_context, gitea):
     signed_in = sign_in(make_context, memory, events)
     ctx = make_context("b_open_welcome", memory, events)
     ctx.browser = signed_in.browser
-    first = WELCOME_CHECKLIST["b_add_ssh_key"]
-    page_before = ctx.browser.page.url
-
-    # The engine ticks as soon as b_add_ssh_key verifies, before b_open_welcome: that must not open the issue.
-    ctx.browser.tick_checklist(first)
-    assert ctx.browser.page.url == page_before, "tick_checklist opened the issue on the hire's behalf"
-    assert "- [x]" not in gitea.welcome_issue(HIRE)["body"]
 
     _, opened = reconcile("b_open_welcome", ctx)
     assert opened.ok, opened
     assert f"#{gitea.welcome_issue(HIRE)['number']}" in opened.evidence
-    body = gitea.welcome_issue(HIRE)["body"]
-    print(body)
-    assert f"- [x] {first}" in body and body.count("- [x]") == 1, "the deferred tick was not done on open"
-
-    ctx.browser.tick_checklist(first)  # already ticked is fine
-    assert gitea.welcome_issue(HIRE)["body"].count("- [x]") == 1
 
     ctx.step_id = "b_checklist"
     before, after = reconcile("b_checklist", ctx)
-    assert before.detail["ticked"] == 1
-    assert after.ok, after
-    assert events.modes(checklist_goal(first))[0] == "memory"
-    assert memory.hints[checklist_goal(first)].source_hire in {HIRE, SEED_SOURCE}
+    assert before.detail["ticked"] == 0 and len(before.detail["unticked"]) == len(WELCOME_CHECKLIST)
+    assert after.ok and after.detail["ticked"] == len(WELCOME_CHECKLIST), after
+    print(gitea.welcome_issue(HIRE)["body"])
 
-    # The page attaches each LOCATOR event to a step: none may be anonymous, and a tick belongs to its item's step.
+    # Re-running after a crash between run and check must not untick anything: ticked boxes are left alone.
+    rerun = BROWSER_STEPS["b_checklist"].run(ctx)
+    print(rerun)
+    assert BROWSER_STEPS["b_checklist"].check(ctx).detail["ticked"] == len(WELCOME_CHECKLIST)
+
+    goals = [checklist_goal(item) for item in WELCOME_CHECKLIST.values()]
+    assert all(events.modes(goal) == ["memory"] for goal in goals), "each box acted on once, from the seed"
+    assert all(memory.hints[goal].source_hire == HIRE for goal in goals)
     locator_steps = {d["goal"]: step for t, step, d in events.events if t == "locator"}
     print(locator_steps)
+    assert all(locator_steps[goal] == "b_checklist" for goal in goals)
     assert None not in locator_steps.values()
-    assert locator_steps[checklist_goal(first)] == "b_add_ssh_key"
-    assert locator_steps[checklist_goal(WELCOME_CHECKLIST["t_run_tests"])] == "b_checklist"
 
     # After a restart (blank tab) the open is still proven: the read state lives in Gitea, not the page.
     ctx.browser.close()
