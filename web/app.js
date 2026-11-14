@@ -77,11 +77,15 @@ function formatDuration(seconds) {
   return minutes ? `${minutes}m ${rest}s` : `${total}s`;
 }
 
-function formatTime(iso) {
-  return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-}
-
 const recordedEarlier = (summary) => summary?.finished_at && new Date(summary.finished_at) < pageLoadedAt;
+
+// "earlier today at 1:23 PM", or "on Nov 13 at 1:23 PM" for a run from another day.
+function whenFinished(iso) {
+  const finished = new Date(iso);
+  const time = finished.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  if (finished.toDateString() === pageLoadedAt.toDateString()) return `earlier today at ${time}`;
+  return `on ${finished.toLocaleDateString([], { month: "short", day: "numeric" })} at ${time}`;
+}
 
 function plural(count, word) {
   return `${count} ${word}${count === 1 ? "" : "s"}`;
@@ -175,7 +179,7 @@ function renderRunHead() {
   if (recordedEarlier(summary)) {
     const label = document.createElement("span");
     label.className = "recorded";
-    label.textContent = `, recorded earlier today at ${formatTime(summary.finished_at)}`;
+    label.textContent = `, ${whenFinished(summary.finished_at)}`;
     state.append(label);
   }
   $("resume").hidden = !summary || Boolean(summary.finished_at) || view.running;
@@ -197,7 +201,7 @@ function comparisonLine(summary, label) {
     name,
     `${machine}: ${formatDuration(summary.elapsed_s)}, ${plural(summary.errors, "error")}, ` +
       `${summary.fixes_from_memory} from memory, ${plural(summary.llm_calls, "LLM call")}` +
-      (recordedEarlier(summary) && label !== view.hire ? ", recorded earlier" : ""),
+      (recordedEarlier(summary) && summary.hire !== view.hire ? `, finished ${whenFinished(summary.finished_at)}` : ""),
   );
   return line;
 }
