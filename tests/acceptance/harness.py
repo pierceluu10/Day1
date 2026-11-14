@@ -15,6 +15,7 @@ from typing import Any
 import pytest
 from pymongo.database import Database
 
+from atlas import EVENT_ORDER
 from dayone.config import ROOT
 from dayone.contracts import EventType, container_name
 
@@ -157,7 +158,7 @@ class EventWatcher:
         query: dict[str, Any] = {"hire": self.hire}
         if self.since is not None:
             query["ts"] = {"$gte": self.since}
-        fresh = [event for event in self.db.events.find(query).sort([("ts", 1), ("_id", 1)]) if event["_id"] not in self.seen]
+        fresh = [event for event in self.db.events.find(query).sort(EVENT_ORDER) if event["_id"] not in self.seen]
         for event in fresh:
             self.seen.add(event["_id"])
             self.since = event["ts"]

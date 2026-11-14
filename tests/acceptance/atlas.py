@@ -16,7 +16,7 @@ from pymongo.database import Database
 
 from dayone.contracts import EventType, FixSource
 
-EVENT_ORDER = [("ts", 1), ("_id", 1)]
+EVENT_ORDER = [("ts", 1), ("seq", 1), ("_id", 1)]  # one writer per hire; seq orders a batch sharing a ts
 MEMORY_SOURCES = frozenset({FixSource.EXACT_MEMORY.value, FixSource.SEMANTIC_MEMORY.value})
 
 
