@@ -26,7 +26,7 @@ from dayone.contracts import (
     idempotency_key,
 )
 from dayone.gitea import GiteaClient
-from scripts.seed import ensure_hire, ensure_team
+from scripts.seed import TEAM, ensure_hire, ensure_team
 
 HIRE = "dev4"  # session 4's own Gitea user and container; the five demo hires are never touched
 SCREENSHOT_DIR = STATE_DIR / "screenshots"
@@ -125,7 +125,7 @@ def container() -> str:
 @pytest.fixture(scope="session")
 def dev_hire(gitea) -> str:
     """A Gitea user seeded exactly like a hire (team member, assigned Welcome issue) but never used by the demo."""
-    ensure_hire(gitea, ensure_team(gitea), HIRE, settings().gitea_hire_password)
+    ensure_hire(gitea, ensure_team(gitea, TEAM, "write"), HIRE, settings().gitea_hire_password)
     return HIRE
 
 

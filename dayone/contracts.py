@@ -132,7 +132,6 @@ class Step:
     title: str
     check: Callable[[StepContext], CheckResult]  # must use a different route from run()
     run: Callable[[StepContext], RunResult]  # the naive action the README/checklist implies
-    checklist_item: str | None = None  # text of the Welcome issue item this step ticks
 
 
 def idempotency_key(hire: str, step_id: str) -> str:
@@ -198,7 +197,7 @@ class FixProposal:
     experience_id: str | None = None
     similarity: float | None = None  # vectorSearchScore, shown on screen
     source_hire: str | None = None  # whose experience this came from
-    adapted_from: str | None = None  # e.g. "apt" when commands were adapted to apk
+    adapted_from: str | None = None  # source machine summary, e.g. "ubuntu 22.04, apt", when adapted for another machine
 
 
 @dataclass(frozen=True)
@@ -271,7 +270,6 @@ class Executor(Protocol):
 class BrowserSession(Protocol):
     """One headed Chromium per run, overlay injected. Browser steps get the page through the concrete class."""
 
-    def tick_checklist(self, item: str) -> None: ...
     def close(self) -> None: ...
 
 
