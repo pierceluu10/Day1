@@ -7,7 +7,7 @@ from dayone.contracts import STEP_IDS
 
 
 def test_run_summary_counts_this_run_and_the_ledger(db, event):
-    db.hires.insert_one({"name": "ada", "machine": "ubuntu"})
+    db.hires.insert_one({"_id": "ada", "machine": "ubuntu", "status": "finished"})
     db.events.insert_many(
         [
             event("ada", "old", "run_started", 0),

@@ -212,7 +212,7 @@ def start(db: Database, hire: str, machine: Machine, live: bool, speed: float, s
     db[queries.STEPS].delete_many({"hire": hire})
     run_id = uuid.uuid4().hex
     db[queries.HIRES].replace_one(
-        {"name": hire}, {"name": hire, "machine": machine.value, "container": container_name(hire), "run_id": run_id}, upsert=True
+        {"_id": hire}, {"_id": hire, "machine": machine.value, "container": container_name(hire), "run_id": run_id}, upsert=True
     )
     ledger = Ledger(db, hire, machine, run_id, live, speed, datetime.now(UTC) - started_ago)
     ledger.emit(EventType.RUN_STARTED, machine=machine.value)
@@ -223,7 +223,7 @@ def resumed(db: Database, hire: str, speed: float) -> Ledger:
     run_id = queries.latest_run_id(db, hire)
     if run_id is None:
         raise LookupError(f"no run for {hire} to resume; run the `barbara` scenario first")
-    ledger = Ledger(db, hire, Machine(db[queries.HIRES].find_one({"name": hire})["machine"]), run_id, True, speed)
+    ledger = Ledger(db, hire, Machine(db[queries.HIRES].find_one({"_id": hire})["machine"]), run_id, True, speed)
     ledger.emit(EventType.RUN_RESUMED)
     return ledger
 
