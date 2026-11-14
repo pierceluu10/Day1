@@ -15,7 +15,7 @@ import traceback
 import uuid
 from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from types import TracebackType
 
 from playwright.sync_api import Error as PlaywrightError
@@ -49,6 +49,7 @@ from dayone.contracts import (
     container_name,
     idempotency_key,
 )
+from dayone.memory.experience import FIX_OUTPUT
 from dayone.store.atlas import AtlasStore
 
 log = logging.getLogger(__name__)
@@ -364,14 +365,22 @@ class Run:
         executor = self.parts.executor
         self._intend(step)
         in_repo = executor.exec(f"test -d {REPO_DIR}", self.parts.exec_timeout_s).ok
+        outputs: list[dict[str, object]] = []  # what each fix command printed, for memory's next attempt
         for command in proposal.commands:
             result = executor.exec(command, self.parts.exec_timeout_s, REPO_DIR if in_repo else None)
+            outputs.append({"command": command, "exit_code": result.exit_code, "output": result.output})
             if not result.ok:
-                failed = CheckResult(ok=False, evidence=f"fix command failed: {command}", error_text=result.output)
+                failed = CheckResult(
+                    ok=False,
+                    evidence=f"fix command failed: {command}",
+                    detail={FIX_OUTPUT: outputs},
+                    error_text=result.output,
+                )
                 self.store.record_check(self.hire.name, step.id, failed)
                 return failed
         self._run(step)
-        return self._check(step)
+        check = self._check(step)
+        return replace(check, detail={**check.detail, FIX_OUTPUT: outputs})
 
     def _intend(self, step: Step) -> None:
         key = idempotency_key(self.hire.name, step.id)
