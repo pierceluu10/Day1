@@ -213,6 +213,64 @@ def test_reasoning_stops_after_three_attempts_and_feeds_back_each_new_error(harn
     assert experiences.count_documents({"outcome": "verified"}) == 0
 
 
+RUNTIME_ERROR = """Processing /root/acme-api
+  Installing build dependencies: started
+  Installing build dependencies: finished with status 'done'
+ERROR: Package 'acme-api' requires a different Python: 3.10.12 not in '>=3.12'
+"""
+
+
+def test_semantic_retrieval_never_crosses_steps(harness):
+    memory, llm, events, _, experiences = harness
+    runtime = Failure(
+        hire="ada",
+        step_id="t_runtime",
+        kind=StepKind.TERMINAL,
+        error_text=RUNTIME_ERROR,
+        fingerprint="runtime-python",
+        facts=UBUNTU,
+    )
+    assert memory.resolve(runtime, lambda proposal: PASSED).fixed
+    wait_until_searchable(experiences, 1)
+
+    calls: list[FixProposal] = []
+    resolution = memory.resolve(failure("grace", UBUNTU, UBUNTU_PG_CONFIG), apt_fix_passes(calls))
+
+    assert resolution.fixed and resolution.proposal.source == FixSource.REASONING
+    assert calls[0].source == FixSource.REASONING, "ada's t_runtime fix must not be tried for t_system_package"
+    assert not [hit for hit in events.of(EventType.MEMORY_HIT)]
+    assert events.of(EventType.REASONING_STARTED)[-1]["hints"] == [], "other steps are not even hints"
+    assert "3.10.12" not in llm.prompts[-1]
+
+
+def test_saved_fix_is_the_reasoning_chain_without_a_failed_memory_proposal(harness):
+    memory, _, _, _, experiences = harness
+    ada = save_ada_ubuntu_fix(memory, [])
+    wrong = ["rm -rf .venv", "python3.12 -m venv .venv"]  # what memory wrongly held in ada's integrated run
+    experiences.update_one({"_id": ObjectId(ada.proposal.experience_id)}, {"$set": {"fix_commands": wrong}})
+    wait_until_searchable(experiences, 1)
+
+    calls: list[FixProposal] = []
+    apt_fix = apt_fix_passes([])
+
+    def check(proposal: FixProposal) -> CheckResult:
+        calls.append(proposal)
+        if proposal.source == FixSource.SEMANTIC_MEMORY:
+            return CheckResult(ok=False, evidence="pip wheel failed", error_text=UBUNTU_PG_CONFIG)
+        return apt_fix(proposal)
+
+    debian_error = UBUNTU_PG_CONFIG.replace("k2x9f1q3", "p0w8z7m2")
+    resolution = memory.resolve(failure("grace", DEBIAN, debian_error), check)
+
+    assert resolution.fixed and calls[0].source == FixSource.SEMANTIC_MEMORY
+    assert list(calls[0].commands) == wrong
+    saved = experiences.find_one({"_id": ObjectId(resolution.proposal.experience_id)})
+    reasoning_fixes = [command for call in calls[1:] for command in call.commands if not command.endswith("|| true")]
+    print("saved", saved["fix_commands"])
+    assert saved["fix_commands"] == reasoning_fixes
+    assert not set(wrong) & set(saved["fix_commands"]), "the failed memory proposal is not part of the fix"
+
+
 def test_close_loop_opens_one_issue_per_repeated_fix_and_is_idempotent(harness):
     memory, _, events, gitea, experiences = harness
     save_ada_ubuntu_fix(memory, [])
@@ -261,8 +319,17 @@ def test_guard_makes_model_commands_runnable_unattended():
         "apk add --no-cache gcc",
     )
     assert guard_commands(["apt-get install --yes gcc"]) == ("DEBIAN_FRONTEND=noninteractive apt-get install --yes gcc",)
-    commands, rationale = parse_fix('```json\n{"commands": ["apt-get update"], "rationale": "refresh"}\n```')
+    inspect, commands, rationale = parse_fix(
+        '```json\n{"inspect": ["grep -rn init ."], "commands": ["apt-get update"], "rationale": "refresh"}\n```'
+    )
+    assert inspect == ("grep -rn init . || true",), "a grep with no match must not abort the attempt"
     assert commands == ("apt-get update",) and rationale == "refresh"
-    for reply in ("no json here", '{"commands": "apt-get update"}', '{"commands": ["  "]}'):
+    for reply in (
+        "no json here",
+        '{"commands": "apt-get update"}',
+        '{"commands": ["  "]}',
+        '{"inspect": ["ls"]}',
+        '{"inspect": "ls", "commands": ["true"]}',
+    ):
         with pytest.raises(LLMResponseError):
             parse_fix(reply)
