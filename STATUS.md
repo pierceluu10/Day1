@@ -55,15 +55,14 @@ Integration branch: `claude/day-one-mongodb-agent-6cc839` (orchestrator session)
 
 ## In progress / blocked / next
 
-Updated 13:25.
+Updated 13:57.
 
-All seven branches merged into integration and their suites pass there (engine, memory, overlay, infra, API, terminal fast tests; browser in-session).
+**Ada (hire 1, ubuntu)**: green 13:23. 9m 14s first start to finish (includes a crash and resume), 5 errors, 0 from memory, 4 fixed by reasoning.
 
-**Ada (hire 1, ubuntu) green end to end at 13:23**: 13/13 steps done in Atlas `dayone`. Four snags fixed by reasoning (runtime, system package, settings, db init; 5 LLM calls). Crash (13:17, failed step) then `dayone resume`: 10 done steps reconciled in 15 s with run_count unchanged, failed step retried and fixed. SSH key verified by API + `ssh -T`; clone `8094472 = 8094472`; Welcome checklist 6/6 via API.
+**Grace (hire 2, debian)**: clean run green 13:55. 6m 21s, 4 errors, 4 fixed from memory (all adapted from ada's ubuntu fixes: one adapt LLM call each, 0 reasoning), tests 13/13. An earlier grace run was discarded: session 3's live tests ran apt in dayone-grace at the same time, and memory replayed the Ubuntu-only PPA on Debian (fixed in 3616578).
 
-Open:
-- Memory (5): saved `t_init_db` fix kept the failed `make migrate`; blocks hire 2 zero-LLM replay.
-- Terminal (3): `t_run_tests` check runs pytest itself, so it is always `skipped`/untrusted; moving to a HEAD-keyed junit report written by run().
-- Page (6): testing Start with a real grace run.
+Fixed since 13:25: memory adapts across OSes, not just across package managers (3616578); reset removes the container by name (c87bacd); dev tests use Gitea users dev3/dev4 and their own containers (6500679, 0a8397b, 61c3b9e).
 
-Next: grace (debian, hire 2) from memory; kill -9 harness (QA); push_change live; ken on alpine; measure.
+Running: linus (hire 3, ubuntu), expected exact matches with 0 LLM calls, which should open the README issue.
+
+Next: barbara live rehearsal (kill -9, resume, push_change); ken on alpine; QA acceptance report; page check; README/DEMO numbers.
