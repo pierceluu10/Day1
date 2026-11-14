@@ -1,8 +1,8 @@
-Collecting httpx==0.28.1 (from -r requirements.txt (line 3))
+Collecting fastapi==0.163.0 (from acme-api==1.4.0->-r requirements.txt (line 1))
+  Using cached fastapi-0.163.0-py3-none-any.whl.metadata (27 kB)
+Collecting httpx==0.28.1 (from acme-api==1.4.0->-r requirements.txt (line 1))
   Using cached httpx-0.28.1-py3-none-any.whl.metadata (7.1 kB)
-Collecting pytest==8.3.4 (from -r requirements.txt (line 4))
-  Using cached pytest-8.3.4-py3-none-any.whl.metadata (7.5 kB)
-Collecting psycopg2==2.9.10 (from -r requirements.txt (line 5))
+Collecting psycopg2==2.9.10 (from acme-api==1.4.0->-r requirements.txt (line 1))
   Using cached psycopg2-2.9.10.tar.gz (385 kB)
   Installing build dependencies: started
   Installing build dependencies: finished with status 'done'
