@@ -9,7 +9,8 @@ from pathlib import Path
 import pytest
 
 from dayone.contracts import REPO_DIR, STEP_IDS, CheckResult, Machine
-from dayone.steps.terminal_steps import TERMINAL_STEPS, ssh_auth_ok
+from dayone.steps.terminal_steps import TERMINAL_STEPS
+from dayone.terminal.ssh import ssh_auth_ok
 from dayone.terminal.fingerprint import fingerprint
 
 DEV_HIRE = "grace"

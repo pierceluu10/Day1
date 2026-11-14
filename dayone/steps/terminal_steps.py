@@ -26,6 +26,7 @@ from dayone.contracts import (
     StepContext,
     StepKind,
 )
+from dayone.terminal.ssh import SSH_OPTIONS
 
 QUICK_TIMEOUT_S = 60.0
 INSTALL_TIMEOUT_S = 900.0
@@ -37,7 +38,6 @@ VENV_DIR = f"{REPO_DIR}/.venv"
 VENV_PYTHON = f"{VENV_DIR}/bin/python"
 KEY_PATH = "/root/.ssh/id_ed25519"
 CLONE_URL = f"git@{GITEA_HOSTNAME}:{REPO}.git"
-SSH_OPTIONS = "-o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=10"
 WHEEL_DIR = "/tmp/dayone-wheels"
 JUNIT_PATH = "/tmp/dayone-junit.xml"
 
@@ -48,7 +48,6 @@ BASE_TOOLS = {
 }
 REQUIRED_TOOLS = ("git", "ssh", "python", "pip")
 KEY_LINE = re.compile(r"^(?P<bits>\d+) (?P<fingerprint>SHA256:\S+) (?P<comment>.*) \((?P<type>\w+)\)$")
-SSH_AUTHENTICATED = re.compile(r"Hi there, (?P<user>[\w.-]+)! You've successfully authenticated")
 SPECIFIER = re.compile(r"(?P<op>>=|<=|==|!=|>|<)\s*(?P<version>\d+(?:\.\d+)*)")
 COMPARISONS = {">=": operator.ge, "<=": operator.le, "==": operator.eq, "!=": operator.ne, ">": operator.gt, "<": operator.lt}
 
@@ -141,15 +140,6 @@ def run_ssh_keygen(ctx: StepContext) -> RunResult:
     return _shell_run(command, QUICK_TIMEOUT_S)(ctx)
 
 
-def ssh_auth_ok(ctx: StepContext) -> CheckResult:
-    """`ssh -T` from the laptop. Gitea exits non-zero even on success, so the greeting decides."""
-    result = _exec(ctx, f"ssh -T {SSH_OPTIONS} git@{GITEA_HOSTNAME}")
-    match = SSH_AUTHENTICATED.search(result.output)
-    if match is None or match["user"] != ctx.hire.name:
-        return _failed("ssh -T: not authenticated", result)
-    return CheckResult(True, f"ssh -T: authenticated as {match['user']}", {"ssh_user": match["user"]})
-
-
 # --- t_clone --------------------------------------------------------------------
 
 CLONE_OR_FAST_FORWARD = (
@@ -197,7 +187,8 @@ def check_runtime(ctx: StepContext) -> CheckResult:
 
 
 def check_system_package(ctx: StepContext) -> CheckResult:
-    command = f"rm -rf {WHEEL_DIR} && {VENV_PYTHON} -m pip wheel --no-deps -r requirements.txt -w {WHEEL_DIR}"
+    # With dependencies: requirements.txt is only `-e .`, so the native deps live in pyproject's dependencies.
+    command = f"rm -rf {WHEEL_DIR} && {VENV_PYTHON} -m pip wheel -r requirements.txt -w {WHEEL_DIR}"
     result = _exec(ctx, command, INSTALL_TIMEOUT_S, REPO_DIR)
     if not result.ok:
         return _failed("native dependencies do not build", result)
