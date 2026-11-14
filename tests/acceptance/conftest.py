@@ -1,4 +1,4 @@
-"""Session fixtures: an emptied `dayone_acceptance` database, the Gitea API, and real onboarding runs."""
+"""Session fixtures: `dayone_acceptance` with empty memory, the Gitea API, and real onboarding runs."""
 
 from __future__ import annotations
 
@@ -41,9 +41,9 @@ def db(acceptance_db_name: str) -> Iterator[Database]:
     assert configured == acceptance_db_name, f"refusing to empty {configured!r}; run with --acceptance"
     client: MongoClient = MongoClient(settings().mongodb_uri)
     db = client[acceptance_db_name]
-    # The hackathon user may not dropDatabase; emptying collections also keeps the vector index built.
-    for name in db.list_collection_names():
-        print(f"emptied {acceptance_db_name}.{name}: {db[name].delete_many({}).deleted_count} documents")
+    # Memory starts empty. Hires, steps and events are left to `dayone reset NAME`, which needs a hire's
+    # doc to find its container. (The hackathon user may not dropDatabase; this also keeps the vector index.)
+    print(f"emptied {acceptance_db_name}.experiences: {db.experiences.delete_many({}).deleted_count} documents")
     yield db
     client.close()
 

@@ -13,7 +13,7 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption(
         ACCEPTANCE_OPTION,
         action="store_true",
-        help=f"run tests/acceptance against the real system (minutes per test; empties Atlas db {ACCEPTANCE_DB})",
+        help=f"run tests/acceptance against the real system (minutes per test; empties memory in Atlas db {ACCEPTANCE_DB})",
     )
     parser.addoption(
         HIRE_OPTION,
