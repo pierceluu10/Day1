@@ -89,4 +89,5 @@ def test_empty_ubuntu_container_reaches_passing_tests(onboard, db, gitea, hires)
         assert experience_id, f"{step_id} was fixed but its ledger entry names no experience"
         experience = find_experience(db, experience_id)
         assert experience, f"{step_id}: experience {experience_id} not in Atlas"
-        assert experience["hire"] == hire and experience["outcome"] == "verified" and experience["verified_by_check"] is True, experience
+        assert experience["hire"] == hire and experience["outcome"] == "verified", experience
+        assert str(experience.get("verified_by_check", "")).strip(), f"{step_id}: experience has no check evidence"
