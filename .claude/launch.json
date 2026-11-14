@@ -2,7 +2,7 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "preflight-page",
+      "name": "dayone-page",
       "runtimeExecutable": "uv",
       "runtimeArgs": ["run", "dayone", "serve"],
       "port": 8000

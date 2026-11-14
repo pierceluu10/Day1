@@ -17,7 +17,7 @@ Hires 1 to 3 and ken were run fresh between 15:08 and 15:29 on `acme-api` c9d8d7
 ## Screen layout
 
 - Left two thirds: the headed Chromium window the agent drives, with `intern_overlay.js` rings (green = acting from memory, amber = reasoning, red "This moved." = a saved locator failed).
-- Right third: the Preflight page (`http://localhost:8000`). It shows the step list with status and one evidence line each, the streaming terminal below it, and the comparison lines computed from Atlas, e.g. "ada, hire 1 (ubuntu): 2m 55s, 4 errors, 0 from memory, 7 LLM calls, finished earlier today at …" and "linus (ubuntu): 2m 36s, 4 errors, 4 from memory, 0 LLM calls".
+- Right third: the Day One page (`http://localhost:8000`). It shows the step list with status and one evidence line each, the streaming terminal below it, and the comparison lines computed from Atlas, e.g. "ada, hire 1 (ubuntu): 2m 55s, 4 errors, 0 from memory, 7 LLM calls, finished earlier today at …" and "linus (ubuntu): 2m 36s, 4 errors, 4 from memory, 0 LLM calls".
 - A terminal tab for `scripts/move_ui.sh`, `kill -9` and `scripts/push_change.sh`.
 
 ## What to say about time
@@ -34,7 +34,7 @@ Times come from the 15:2x barbara rehearsal: from Start, everything up to the re
 
 | Time | What the audience sees (real strings) | Track 3 question | If it goes wrong |
 |---|---|---|---|
-| 0:00 | One sentence: every new hire hits the same broken setup steps and the fix is lost. Preflight fixes that. Point at ada's recorded line: 4 errors, all solved by reasoning, 7 LLM calls. | | |
+| 0:00 | One sentence: every new hire hits the same broken setup steps and the fix is lost. Day One fixes that. Point at ada's recorded line: 4 errors, all solved by reasoning, 7 LLM calls. | | |
 | 0:10 | In the terminal tab: `scripts/move_ui.sh` ("we just changed Gitea's SSH-key form"). Gitea restarts for 2 to 3 s; wait for it to return before Start. | Q3 | If Gitea does not answer within 10 s, skip the UI move and say so. |
 | 0:15 | Type `barbara`, pick ubuntu, Start. "Base tools installed" takes about 30 s (*talk*: the four recorded hires, 7 → 4 → 0 LLM calls on the comparison lines). | | |
 | 0:45 | Chromium signs in with a green ring (locator from memory). At the key form the saved locator fails: red "This moved.", then amber while it reasons over the page's accessibility text, finds the new fields, adds the key and saves the new locator. | Q3, Q1 | If reasoning takes all 3 attempts, keep talking: "it is reading the page, not guessing a selector". |
@@ -45,7 +45,7 @@ Times come from the 15:2x barbara rehearsal: from Start, everything up to the re
 | 2:05 | Right after resume, while "System packages" is re-checked or building: `scripts/push_change.sh` adds python-ldap, which needs another system package. When the next step starts, the notice reads "Remote HEAD moved c9d8d7f… → …. Downstream steps re-verified." "acme-api cloned" and every later step turn stale. | Q3 | If the notice has not appeared by "Tests pass", the push landed too late: say so and show test 6's recorded drift instead. |
 | 2:10 | The new python-ldap build error goes to memory; the remembered psycopg2 fix does not cover it, so it reasons (amber) and installs `libldap2-dev libsasl2-dev`, then saves the experience. About 50 s, plus the rebuild (*talk*: ken's recorded Alpine line, "similar error from ada, similarity 0.94, adapted from ubuntu 22.04, apt: apk add --no-cache postgresql-dev build-base python3-dev musl-dev"). | Q3, memory | If all 3 attempts fail, the run stops with "System packages" failed: say "it stops rather than claiming success", and show test 6's recorded fix. |
 | 3:15 | "Tests pass": "14 passed of 14, exit 0 at …". "Welcome checklist ticked": "API issue body: 6/6 items ticked". | | |
-| 3:25 | Gitea: the README issues Preflight opened on `acme-api` (#10 to #13), one per snag applied for two or more hires. | closing the loop | These four predate the rename and say "Opened by Day One": "that was its working name"; new issues say Preflight. |
+| 3:25 | Gitea: the README issues Day One opened on `acme-api` (#10 to #13), one per snag applied for two or more hires. | closing the loop | |
 | 3:40 | One sentence: state in Atlas, verified by independent checks, memory by vector search. | | |
 
 ## Snags in `acme-api` (what the agent must discover; the README mentions none)

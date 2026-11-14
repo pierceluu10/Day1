@@ -37,7 +37,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         client.close()
 
 
-app = FastAPI(title="Preflight", lifespan=lifespan)
+app = FastAPI(title="Day One", lifespan=lifespan)
 
 
 def _jsonable(value: Any) -> Any:

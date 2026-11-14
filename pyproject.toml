@@ -1,7 +1,7 @@
 [project]
 name = "dayone"
 version = "0.1.0"
-description = "Preflight: an onboarding agent with verified task state and experience memory on MongoDB Atlas"
+description = "Day One: an onboarding agent with verified task state and experience memory on MongoDB Atlas"
 requires-python = ">=3.11"
 dependencies = [
   "anthropic",
