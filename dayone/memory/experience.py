@@ -47,7 +47,8 @@ INDEX_WAIT_S = 300.0
 NUM_CANDIDATES = 100
 HINT_COUNT = 3
 SEMANTIC_MIN_SIMILARITY = 0.8  # Atlas cosine score; Phase 0 saw 0.847 for the right fix, 0.73 for the next one
-MAX_REASONING_ATTEMPTS = 3
+MAX_REASONING_ATTEMPTS = 3  # fixes actually tried
+MAX_REJECTED_REPLIES = 2  # unparseable replies re-asked on top of those, so a bad reply never costs a try
 MAX_TOKENS = 2048  # replies carry inspect lists; a cut-off reply is rejected and wastes an attempt
 ERROR_TAIL_CHARS = 4000  # pip/apt failures put the cause at the end
 FEEDBACK_CHARS = 3000  # all fix commands' output fed back to the next attempt, split evenly
@@ -56,6 +57,7 @@ ISSUE_ERROR_LINES = 15
 ISSUE_TITLE_COMMAND_CHARS = 120
 README_MIN_HIRES = 2
 
+JSON_ESCAPE = re.compile(r'\\(["\\/bfnrtu])|\\')  # a valid escape pair, or a lone backslash
 APT_INSTALL = re.compile(r"^(apt-get|apt)\s+install\b")
 ASSUME_YES = re.compile(r"\s(-y|--yes|--assume-yes)\b")
 SUDO = "sudo "
@@ -63,7 +65,9 @@ APT_NONINTERACTIVE = "DEBIAN_FRONTEND=noninteractive "
 
 FIX_RULES = f"""Commands run as root with `sh -lc` in the new hire's throwaway container, in {REPO_DIR} when it exists.
 Use the machine's own package manager. Non-interactive only (-y, --no-cache), no sudo, one command per string,
-do not chain with && or ;. Commands from earlier attempts already ran; only add what is still needed."""
+do not chain with && or ;. Commands from earlier attempts already ran; only add what is still needed.
+The project's Python is the venv at {REPO_DIR}/.venv: use .venv/bin/python and .venv/bin/pip for anything in the
+project, never the system python or pip."""
 STRICT_JSON = "Reply with strict JSON and nothing else: "
 
 REASON_SYSTEM = f"""You fix failed setup steps on a new hire's development machine.
@@ -158,10 +162,16 @@ def parse_fix(reply: str) -> tuple[tuple[str, ...], tuple[str, ...], str]:
     start, end = reply.find("{"), reply.rfind("}")
     if start < 0 or end < start:
         raise LLMResponseError(f"no JSON object in reply: {reply[:200]!r}")
+    text = reply[start : end + 1]
     try:
-        body = json.loads(reply[start : end + 1])
+        body = json.loads(text)
     except json.JSONDecodeError as error:
-        raise LLMResponseError(f"invalid JSON: {error}") from error
+        # Models write shell regexes like `grep 'a\|b'` without doubling the backslash; keep it literal and retry.
+        repaired = JSON_ESCAPE.sub(lambda match: match.group(0) if match.group(1) else "\\\\", text)
+        try:
+            body = json.loads(repaired)
+        except json.JSONDecodeError:
+            raise LLMResponseError(f"invalid JSON: {error}") from error
     if "commands" not in body:
         raise LLMResponseError("`commands` is missing")
     commands = guard_commands(_strings(body, "commands"))
@@ -342,7 +352,8 @@ class ExperienceMemory:
         # The saved fix is this chain only: a memory proposal that already failed is not part of what fixed it.
         chain: list[str] = []
         error = failure.error_text
-        for _ in range(MAX_REASONING_ATTEMPTS):
+        tried = rejected = 0
+        while tried < MAX_REASONING_ATTEMPTS:
             prompt = (
                 f"Machine: {failure.facts.summary()}\nStep {failure.step_id} fails with:\n{_tail(error)}\n\n"
                 + (f"Past verified fixes for similar errors (hints, may not apply):\n{hint_text}\n\n" if hints else "")
@@ -353,8 +364,12 @@ class ExperienceMemory:
             try:
                 inspect, commands, rationale = parse_fix(self._llm.complete(REASON_SYSTEM, prompt, MAX_TOKENS))
             except LLMResponseError as reply_error:
-                history.append(f"Your reply was rejected: {reply_error}")
+                rejected += 1
+                if rejected > MAX_REJECTED_REPLIES:
+                    break
+                history.append(f"Your reply was rejected, nothing ran: {reply_error}")
                 continue
+            tried += 1
             proposal = FixProposal(commands=inspect + commands, source=FixSource.REASONING, rationale=rationale)
             chain.extend(commands)
             if self._try(failure, proposal, try_fix, progress):
