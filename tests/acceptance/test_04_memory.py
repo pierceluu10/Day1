@@ -3,7 +3,7 @@
 import pytest
 
 from atlas import ledger, numbers, of_type, run_events
-from dayone.contracts import DONE_STATUSES, EventType, FixSource, Machine
+from dayone.contracts import DONE_STATUSES, EventType, FixSource, Machine, StepKind
 from harness import distinct, requires_system
 
 pytestmark = [pytest.mark.system, requires_system]
@@ -22,7 +22,7 @@ def test_second_hire_resolves_first_hires_errors_from_memory(onboard, db, hires)
     second = onboard(second_hire, Machine.UBUNTU)
     assert second.exit_code == 0, second.output_tail
 
-    learned = {doc["fingerprint"] for doc in db.experiences.find({"hire": first_hire, "outcome": "verified"})}
+    learned = {doc["fingerprint"] for doc in db.experiences.find({"hire": first_hire, "outcome": "verified", "kind": StepKind.TERMINAL.value})}
     first_errors = errors_by_step(db, first_hire, first.run_id)
     second_errors = errors_by_step(db, second_hire, second.run_id)
     print(f"{first_hire} errors: {first_errors}\n{second_hire} errors: {second_errors}\nlearned from {first_hire}: {learned}")
