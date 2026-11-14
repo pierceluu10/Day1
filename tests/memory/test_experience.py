@@ -20,6 +20,7 @@ from dayone.contracts import (
     StepKind,
 )
 from dayone.memory.experience import (
+    FIX_OUTPUT,
     MAX_REASONING_ATTEMPTS,
     REASON_SYSTEM,
     SEMANTIC_MIN_SIMILARITY,
@@ -310,6 +311,34 @@ def test_unparseable_reply_does_not_use_up_a_tried_attempt(harness, embedder):
     assert resolution.llm_calls == flaky.calls == MAX_REASONING_ATTEMPTS + 1
     assert "rejected, nothing ran" in llm.prompts[0]
     assert ".venv/bin/pip" in REASON_SYSTEM
+
+
+def test_saved_fix_keeps_only_commands_that_exited_zero(harness):
+    memory, _, _, _, experiences = harness
+    calls: list[FixProposal] = []
+
+    def engine_try_fix(proposal: FixProposal) -> CheckResult:
+        """Like runner._try_fix: stop at the first failing command; attempt 1's last fix command exits 2."""
+        calls.append(proposal)
+        fixes = [command for command in proposal.commands if not command.endswith("|| true")]
+        outputs = []
+        for command in proposal.commands:
+            failing = len(calls) == 1 and command == fixes[-1]
+            outputs.append({"command": command, "exit_code": 2 if failing else 0, "output": ""})
+            if failing:
+                return CheckResult(
+                    ok=False, evidence=f"fix command failed: {command}", detail={FIX_OUTPUT: outputs},
+                    error_text="make: *** No rule to make target 'migrate'.  Stop.",
+                )
+        return CheckResult(ok=True, evidence="schema present: users", detail={FIX_OUTPUT: outputs})
+
+    resolution = memory.resolve(failure("ada", UBUNTU, "sqlite3.OperationalError: no such table: users"), engine_try_fix)
+
+    assert resolution.fixed and resolution.attempts == 2
+    first, second = ([c for c in call.commands if not c.endswith("|| true")] for call in calls)
+    saved = experiences.find_one({"_id": ObjectId(resolution.proposal.experience_id)})
+    print("attempt 1", first, "attempt 2", second, "saved", saved["fix_commands"])
+    assert saved["fix_commands"] == first[:-1] + second, "the failed command must not be replayed by hire 2"
 
 
 def test_close_loop_opens_one_issue_per_repeated_fix_and_is_idempotent(harness):

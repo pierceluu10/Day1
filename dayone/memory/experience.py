@@ -182,6 +182,16 @@ def parse_fix(reply: str) -> tuple[tuple[str, ...], tuple[str, ...], str]:
     return inspect, commands, str(body.get("rationale", ""))
 
 
+def succeeded(commands: tuple[str, ...], check: CheckResult) -> list[str]:
+    """The fix commands that exited 0, per the engine's `detail[FIX_OUTPUT]`."""
+    results = check.detail.get(FIX_OUTPUT)
+    if results is None:
+        # shortcut: a try_fix without FIX_OUTPUT gives no exit codes, so keep every command; all engines send it now.
+        return list(commands)
+    exited_ok = {result["command"] for result in results if result["exit_code"] == 0}
+    return [command for command in commands if command in exited_ok]
+
+
 def command_feedback(check: CheckResult) -> str:
     """What the fix commands printed, from the engine's `detail[FIX_OUTPUT]`, capped so the prompt stays small."""
     results = check.detail.get(FIX_OUTPUT, [])
@@ -349,7 +359,8 @@ class ExperienceMemory:
             for hint in hints
         )
         history: list[str] = []
-        # The saved fix is this chain only: a memory proposal that already failed is not part of what fixed it.
+        # The saved fix is this chain only: a memory proposal that already failed is not part of what fixed it, and a
+        # command that failed or never ran would abort the next hire's replay (try_fix stops at the first failure).
         chain: list[str] = []
         error = failure.error_text
         tried = rejected = 0
@@ -371,8 +382,9 @@ class ExperienceMemory:
                 continue
             tried += 1
             proposal = FixProposal(commands=inspect + commands, source=FixSource.REASONING, rationale=rationale)
-            chain.extend(commands)
-            if self._try(failure, proposal, try_fix, progress):
+            passed = self._try(failure, proposal, try_fix, progress)
+            chain.extend(succeeded(commands, progress.last_check))
+            if passed:
                 saved = self._save(failure, tuple(chain), progress, proposal)
                 return progress.resolution(replace(proposal, experience_id=str(saved)))
             check = progress.last_check
