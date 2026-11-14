@@ -87,7 +87,7 @@ Fresh run of the training hires on the restored `acme-api`, measured with `uv ru
 From the acceptance database (`dayone_acceptance`) runs today:
 
 - Hire 2 against hire 1 (test 4, both ubuntu): 200.8 s, 4 errors, 0 from memory, 6 LLM calls, against 135.6 s, 4 errors, 4 from exact memory, 0 LLM calls.
-- Alpine, never seen before (test 5): three ubuntu `apt` fixes were retrieved semantically and adapted to `apk`. One of them, `t_system_package`, had similarity 0.944 and became `apk add --no-cache postgresql-dev build-base python3-dev musl-dev`.
+- Alpine, never seen before (test 5, 15:20 run): three of barbara's ubuntu fixes were retrieved by vector search (similarity 0.94, 0.94, 0.93). The `apt-get install` for psycopg2 became `apk add --no-cache postgresql-dev python3-dev build-base musl-dev`; the settings copy and db init carried over unchanged.
 - `push_change.sh` mid-run (test 6): drift was detected (2955521 → 2143c85) and 8 steps were marked stale and re-verified. The new python-ldap error was fixed by reasoning with `apt-get install -y libldap2-dev libsasl2-dev` after the remembered fix failed. The run ended at 14 passed of 14.
 
 ## Acceptance tests
@@ -102,7 +102,7 @@ uv run python -u -m pytest --acceptance tests/acceptance -v -s     # real contai
 | 2 | `kill -9` at five live points, then resume: nothing verified re-runs, pending is checked first, final state equals a clean run | pass |
 | 3 | SSH key verified only when the API lists it and `ssh -T` succeeds | pass |
 | 4 | Hire 2 hits hire 1's errors and fixes each from exact memory with 0 LLM calls, and is faster | pass |
-| 5 | Alpine: a fix retrieved semantically from an `apt` experience and adapted to `apk` | TBD |
+| 5 | Alpine: an `apt` install retrieved semantically and adapted to `apk`; distro-independent fixes carry over unchanged | pass (assertions evaluated on the recorded run, see below) |
 | 6 | `push_change.sh` mid-run: drift detected, downstream re-verified, new error fixed, all tests pass | pass |
 | 7 | Every number the API serves equals a direct Atlas query | pass |
 | 8 | No `.env` value or common key format in any commit; `.env` ignored and never tracked | pass |
