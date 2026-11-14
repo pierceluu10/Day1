@@ -18,7 +18,6 @@ from dayone.contracts import (
     REPO,
     REPO_BRANCH,
     REPO_DIR,
-    WELCOME_CHECKLIST,
     CheckResult,
     ExecResult,
     RunResult,
@@ -281,7 +280,7 @@ def check_run_tests(ctx: StepContext) -> CheckResult:
 
 
 def _step(step_id: str, title: str, check: Callable[[StepContext], CheckResult], run: Callable[[StepContext], RunResult]) -> Step:
-    return Step(step_id, StepKind.TERMINAL, title, check, run, WELCOME_CHECKLIST.get(step_id))
+    return Step(step_id, StepKind.TERMINAL, title, check, run)
 
 
 TERMINAL_STEPS: dict[str, Step] = {

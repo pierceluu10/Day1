@@ -162,14 +162,7 @@ def checklist_check(ctx: StepContext) -> CheckResult:
 
 BROWSER_STEPS: dict[str, Step] = {
     "b_sign_in": Step("b_sign_in", StepKind.BROWSER, "Sign in to Gitea", sign_in_check, sign_in_run),
-    "b_add_ssh_key": Step(
-        "b_add_ssh_key",
-        StepKind.BROWSER,
-        "Add the laptop's SSH key",
-        add_ssh_key_check,
-        add_ssh_key_run,
-        WELCOME_CHECKLIST["b_add_ssh_key"],
-    ),
+    "b_add_ssh_key": Step("b_add_ssh_key", StepKind.BROWSER, "Add the laptop's SSH key", add_ssh_key_check, add_ssh_key_run),
     "b_open_welcome": Step("b_open_welcome", StepKind.BROWSER, "Open the Welcome issue", open_welcome_check, open_welcome_run),
     "b_checklist": Step("b_checklist", StepKind.BROWSER, "Tick the Welcome checklist", checklist_check, checklist_run),
 }

@@ -132,7 +132,6 @@ class Step:
     title: str
     check: Callable[[StepContext], CheckResult]  # must use a different route from run()
     run: Callable[[StepContext], RunResult]  # the naive action the README/checklist implies
-    checklist_item: str | None = None  # text of the Welcome issue item this step ticks
 
 
 def idempotency_key(hire: str, step_id: str) -> str:
@@ -271,7 +270,6 @@ class Executor(Protocol):
 class BrowserSession(Protocol):
     """One headed Chromium per run, overlay injected. Browser steps get the page through the concrete class."""
 
-    def tick_checklist(self, item: str) -> None: ...
     def close(self) -> None: ...
 
 
