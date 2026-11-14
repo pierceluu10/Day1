@@ -1,3 +1,4 @@
+$ cd /root/acme-api && rm -rf /tmp/dayone-wheels && /root/acme-api/.venv/bin/python -m pip wheel -r requirements.txt -w /tmp/dayone-wheels
               Please consider removing the following classifiers in favor of a SPDX license expression:
       
               License :: OSI Approved :: GNU Library or Lesser General Public License (LGPL)

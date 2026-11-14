@@ -26,6 +26,8 @@ VERSION = re.compile(r"\d+(?:\.\d+)+\w*")
 PACKAGE_MANAGERS = {"alpine": "apk", "ubuntu": "apt", "debian": "apt"}
 FACT_MARKER = "@@dayone-fact "
 ERROR_TAIL_LINES = 40
+PIDFILE_PREFIX = "/tmp/dayone-exec-"
+ORPHAN_PIDFILES = f"{PIDFILE_PREFIX}*.pid"
 
 
 def error_text(result: ExecResult, workdir: str | None = None, message: str = "") -> str:
@@ -62,16 +64,18 @@ class DockerExecutor:
 
     def ensure_container(self) -> None:
         state = self._state()
-        if state == "running":
-            return
-        if state is None:
-            args = ("run", "-d", "--init", "--name", self.container, "--hostname", self.container)
-            image = MACHINE_IMAGES[self.hire.machine]
-            result = _docker(*args, "--network", DOCKER_NETWORK, image, *KEEP_ALIVE, timeout_s=self.timeout_s)
-        else:
-            result = _docker("start", self.container, timeout_s=self.timeout_s)
-        if result.returncode != 0:
-            raise DockerError(f"cannot start {self.container}: {result.stderr.strip()}")
+        if state != "running":
+            if state is None:
+                args = ("run", "-d", "--init", "--name", self.container, "--hostname", self.container)
+                image = MACHINE_IMAGES[self.hire.machine]
+                result = _docker(*args, "--network", DOCKER_NETWORK, image, *KEEP_ALIVE, timeout_s=self.timeout_s)
+            else:
+                result = _docker("start", self.container, timeout_s=self.timeout_s)
+            if result.returncode != 0:
+                raise DockerError(f"cannot start {self.container}: {result.stderr.strip()}")
+        # The lease allows one run per hire, so a pidfile left behind belongs to a run that was killed, and its
+        # command may still hold locks (dpkg) the resumed run needs.
+        self._kill_group(ORPHAN_PIDFILES)
 
     def remove_container(self) -> None:
         if self._state() is None:
@@ -81,7 +85,7 @@ class DockerExecutor:
             raise DockerError(f"cannot remove {self.container}: {result.stderr.strip()}")
 
     def exec(self, command: str, timeout_s: float, workdir: str | None = None) -> ExecResult:
-        pidfile = f"/tmp/dayone-exec-{uuid.uuid4().hex}.pid"
+        pidfile = f"{PIDFILE_PREFIX}{uuid.uuid4().hex}.pid"
         # The exec'd shell leads its own process group; recording its pid lets a timeout kill the whole tree.
         wrapper = f'echo $$ > {pidfile}; sh -lc "$0"; status=$?; rm -f {pidfile}; exit $status'
         args = ["docker", "exec"]
@@ -126,10 +130,13 @@ class DockerExecutor:
         if batch:
             self.events.emit(EventType.TERMINAL_OUTPUT, command=command, chunk="".join(batch))
 
-    def _kill_group(self, pidfile: str) -> None:
+    def _kill_group(self, pidfiles: str) -> None:
+        """Kill the process group recorded in each pidfile matching `pidfiles` (a path or a glob), then remove it."""
         # dash (Ubuntu/Debian sh) rejects `kill -- -pid`; `kill -9 -pid` works in dash and busybox ash.
-        kill = f'pid=$(cat {pidfile}) && kill -9 -$pid; rm -f {pidfile}'
-        _docker("exec", self.container, "sh", "-c", kill, timeout_s=KILL_TIMEOUT_S)
+        kill = f'for f in {pidfiles}; do [ -f "$f" ] || continue; kill -9 -$(cat "$f") 2>/dev/null; rm -f "$f"; done'
+        result = _docker("exec", self.container, "sh", "-c", kill, timeout_s=KILL_TIMEOUT_S)
+        if result.returncode != 0:
+            raise DockerError(f"cannot kill leftover commands in {self.container}: {result.stderr.strip()}")
 
     def facts(self) -> MachineFacts:
         probes = "; ".join(f"echo '{FACT_MARKER}{name}'; {probe} 2>&1" for name, probe in FACT_TOOLS.items())

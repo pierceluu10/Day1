@@ -15,6 +15,9 @@ from dayone.terminal.ssh import ssh_auth_ok
 from dayone.terminal.fingerprint import fingerprint
 
 
+# Minutes per machine: runs only with `pytest --acceptance` (tests/conftest.py skips `system` tests otherwise).
+pytestmark = pytest.mark.system
+
 ERRORS_DIR = Path(__file__).parent / "errors"
 FIX_TIMEOUT_S = 900.0
 DEV_KEY_TITLE = "dayone-dev-terminal-tests"  # dev only: stands in for the browser's b_add_ssh_key
