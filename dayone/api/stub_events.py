@@ -117,7 +117,10 @@ class Ledger:
 
     def set_step(self, step_id: str, **fields: Any) -> None:
         runs = fields.pop("runs", 0)
-        defaults = {"status": StepStatus.NOT_STARTED.value, "check_ever_failed": False, "evidence": "", "fix_source": None, "experience_id": None}
+        defaults = {
+            "status": StepStatus.NOT_STARTED.value, "check_ever_failed": False, "evidence": "", "fix_source": None,
+            "experience_id": None, "llm_calls": 0,
+        }
         self.db[queries.STEPS].update_one(
             {"hire": self.hire, "step_id": step_id},
             {
@@ -145,8 +148,9 @@ class Ledger:
 
     def done(self, step_id: str, status: StepStatus, source: FixSource | None = None) -> None:
         evidence = self.text(step_id)
-        self.set_step(step_id, status=status.value, evidence=evidence, fix_source=source.value if source else None)
-        self.emit(EventType.STEP_STATUS, step_id, status=status.value, evidence=evidence)
+        llm_calls = 1 if source is FixSource.REASONING else 0
+        self.set_step(step_id, status=status.value, evidence=evidence, fix_source=source.value if source else None, llm_calls=llm_calls)
+        self.emit(EventType.STEP_STATUS, step_id, status=status.value, evidence=evidence, reconciled=False)
         self.wait(0.5)
 
     def step(self, step_id: str, fix: FixSource | None = None, hint: dict[str, Any] | None = None) -> None:
@@ -265,25 +269,29 @@ def scenario_resume(db: Database, speed: float) -> None:
         ledger = resumed(db, "barbara", speed)
         for doc in queries.steps(db, "barbara"):
             if doc["status"] in DONE_STATUSES:
+                # Like the engine: settled by its check, nothing run, the ledger keeps its status.
                 ledger.check(doc["step_id"], True, doc["evidence"])
-                ledger.emit(EventType.STEP_STATUS, doc["step_id"], status=StepStatus.SKIPPED.value, evidence=doc["evidence"])
-                ledger.set_step(doc["step_id"], status=StepStatus.SKIPPED.value)
+                ledger.emit(EventType.STEP_STATUS, doc["step_id"], status=doc["status"], evidence=doc["evidence"], reconciled=True)
                 ledger.wait(0.3)
         ledger.check("t_install_deps", True, EVIDENCE["t_install_deps"])
         ledger.done("t_install_deps", StepStatus.VERIFIED)
         ledger.wait(2)
         ledger.emit(EventType.DRIFT_DETECTED, "t_clone", **{"from": HEAD_BEFORE, "to": HEAD_AFTER})
-        stale = ["t_clone", "t_install_deps"]
-        for step_id in stale:
-            ledger.set_step(step_id, status=StepStatus.STALE.value)
-        ledger.emit(EventType.DRIFT_DETECTED, "t_install_deps", reason="requirements.txt changed upstream")
+        reason = f"acme/acme-api@main moved {HEAD_BEFORE} -> {HEAD_AFTER}"
+        for step_id in ("t_clone", "t_runtime", "t_system_package", "t_install_deps"):
+            ledger.set_step(step_id, status=StepStatus.STALE.value, evidence=reason)
+            ledger.emit(EventType.STEP_STATUS, step_id, status=StepStatus.STALE.value, evidence=reason, reconciled=False)
         ledger.wait(1)
         ledger.set_step("t_clone", status=StepStatus.PENDING.value, runs=1)
         ledger.terminal("t_clone", "git pull --ff-only", [f"Updating {HEAD_BEFORE}..{HEAD_AFTER}", " requirements.txt | 1 +"])
         evidence = f"local HEAD {HEAD_AFTER} = API HEAD {HEAD_AFTER}"
         ledger.check("t_clone", True, evidence)
         ledger.set_step("t_clone", status=StepStatus.VERIFIED.value, evidence=evidence)
-        ledger.emit(EventType.STEP_STATUS, "t_clone", status=StepStatus.VERIFIED.value, evidence=evidence)
+        ledger.emit(EventType.STEP_STATUS, "t_clone", status=StepStatus.VERIFIED.value, evidence=evidence, reconciled=False)
+        for step_id in ("t_runtime", "t_system_package"):
+            ledger.check(step_id, True, EVIDENCE[step_id])
+            ledger.set_step(step_id, status=StepStatus.SKIPPED.value, evidence=EVIDENCE[step_id])
+            ledger.emit(EventType.STEP_STATUS, step_id, status=StepStatus.SKIPPED.value, evidence=EVIDENCE[step_id], reconciled=True)
         ledger.set_step("t_install_deps", status=StepStatus.PENDING.value, runs=1)
         ledger.emit(EventType.STEP_PENDING, "t_install_deps")
         ledger.terminal("t_install_deps", RUN_COMMANDS["t_install_deps"], ["Collecting lxml==5.3.0", "error: subprocess-exited-with-error"])

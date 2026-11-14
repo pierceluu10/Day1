@@ -53,12 +53,15 @@ const view = {
   steps: new Map(), // step_id -> ledger doc
   notes: new Map(), // step_id -> { text, kind }
   checking: new Set(),
-  notice: null, // { text, kind }
+  reconciled: new Set(), // settled by its check this pass, nothing run; the ledger keeps the earlier status
+  notices: [], // { text, kind }: resume, drift and README lines for this run, oldest first
   running: false,
   summary: null,
   source: null,
   refreshTimer: null,
-  refreshTicket: 0, // a refresh applies only if no newer one started: Atlas replies can arrive out of order
+  // Atlas replies can arrive out of order: apply a refresh only if it started after the last one applied.
+  refreshTicket: 0,
+  appliedTicket: 0,
   tickTimer: null,
   lastCommand: null,
 };
@@ -108,7 +111,8 @@ function stepRow(stepId) {
   const row = document.createElement("li");
   row.className = "step";
   row.dataset.step = stepId;
-  row.dataset.status = doc.status;
+  const reconciled = view.reconciled.has(stepId) && DONE_STATUSES.has(doc.status);
+  row.dataset.status = reconciled ? "skipped" : doc.status;
   if (view.checking.has(stepId)) row.dataset.checking = "";
 
   const title = document.createElement("span");
@@ -117,7 +121,7 @@ function stepRow(stepId) {
 
   const status = document.createElement("span");
   status.className = "step-status";
-  status.textContent = view.checking.has(stepId) ? "checking" : STATUS_WORDS[doc.status] ?? doc.status;
+  status.textContent = view.checking.has(stepId) ? "checking" : STATUS_WORDS[row.dataset.status] ?? doc.status;
 
   const line = document.createElement("span");
   line.className = "step-line";
@@ -182,12 +186,12 @@ function renderRunHead() {
   }
   $("resume").hidden = !summary || Boolean(summary.finished_at) || view.running;
 
-  const notice = $("notice");
-  notice.hidden = !view.notice;
-  if (view.notice) {
-    notice.textContent = view.notice.text;
-    notice.dataset.kind = view.notice.kind;
-  }
+  $("notices").replaceChildren(...view.notices.map(({ text, kind }) => {
+    const item = document.createElement("li");
+    item.textContent = text;
+    item.dataset.kind = kind;
+    return item;
+  }));
 }
 
 function comparisonLine(summary, label) {
@@ -198,7 +202,7 @@ function comparisonLine(summary, label) {
   line.append(
     name,
     `${machine}: ${formatDuration(summary.elapsed_s)}, ${plural(summary.errors, "error")}, ` +
-      `${summary.fixes_from_memory} from memory, ${plural(summary.llm_fix_calls, "LLM fix call")}` +
+      `${summary.fixes_from_memory} from memory, ${plural(summary.llm_calls, "LLM call")}` +
       (recordedEarlier(summary) && label !== view.hire ? ", recorded earlier" : ""),
   );
   return line;
@@ -245,7 +249,8 @@ async function refresh() {
     getJSON(`/api/hires/${view.hire}/steps`),
     getJSON(`/api/compare/${view.hire}`),
   ]);
-  if (ticket !== view.refreshTicket) return;
+  if (ticket <= view.appliedTicket) return;
+  view.appliedTicket = ticket;
   const previous = view.steps.size ? new Map(view.steps) : null;
   view.steps = new Map(steps.map((doc) => [doc.step_id, doc]));
   view.summary = comparison.current;
@@ -281,11 +286,13 @@ function applyEvent(event) {
     case "run_started":
       view.notes.clear();
       view.checking.clear();
-      view.notice = null;
+      view.notices = [];
+      view.reconciled.clear();
       resetTerminal();
       break;
     case "run_resumed":
-      view.notice = { text: "Resumed: every finished step is re-checked before anything runs.", kind: "resume" };
+      view.reconciled.clear();
+      view.notices.push({ text: "Resumed: every finished step is re-checked before anything runs.", kind: "resume" });
       break;
     case "step_checking":
       view.checking.add(stepId);
@@ -295,6 +302,10 @@ function applyEvent(event) {
       break;
     case "step_pending":
       view.notes.delete(stepId);
+      break;
+    case "step_status":
+      if (data.reconciled) view.reconciled.add(stepId);
+      else view.reconciled.delete(stepId);
       break;
     case "error_captured":
       setNote(stepId, data.error_text.split("\n")[0], "error");
@@ -318,7 +329,7 @@ function applyEvent(event) {
       break;
     case "drift_detected":
       if (data.from && data.to) {
-        view.notice = { text: `Remote HEAD moved ${data.from} → ${data.to}. Re-verifying downstream steps.`, kind: "drift" };
+        view.notices.push({ text: `Remote HEAD moved ${data.from} → ${data.to}. Downstream steps re-verified.`, kind: "drift" });
       } else {
         setNote(data.step_id ?? stepId, `re-check failed: ${data.reason}`, "drift");
       }
@@ -329,7 +340,7 @@ function applyEvent(event) {
       else setNote(stepId, `${data.goal}: finding it by reasoning`, "locating");
       break;
     case "readme_issue_opened":
-      view.notice = { text: `Opened a README issue: ${data.title ?? data.url}`, kind: "resume" };
+      view.notices.push({ text: `Opened a README issue: ${data.title ?? data.url}`, kind: "readme" });
       break;
     case "terminal_output":
       if (data.command !== view.lastCommand && !data.chunk.startsWith("$ ")) appendTerminal(data.command, `$ ${data.command}\n`);
@@ -346,9 +357,9 @@ function applyEvent(event) {
 function watch(hire) {
   view.source?.close();
   clearInterval(view.tickTimer);
-  view.refreshTicket += 1;
+  view.appliedTicket = ++view.refreshTicket; // drops replies still in flight for the previous hire
   Object.assign(view, {
-    hire, steps: new Map(), notes: new Map(), checking: new Set(), notice: null, running: false, summary: null, lastCommand: null,
+    hire, steps: new Map(), notes: new Map(), checking: new Set(), reconciled: new Set(), notices: [], running: false, summary: null, lastCommand: null,
   });
   $("run").hidden = false;
   $("empty").hidden = true;

@@ -7,11 +7,13 @@ import signal
 import subprocess
 import sys
 import time
+import types
 
 import pytest
 
 from dayone import cli
 from dayone.api import processes
+from dayone.contracts import Machine
 
 REAP_TIMEOUT_S = 5.0
 
@@ -81,3 +83,60 @@ def test_cli_resume_without_unfinished_hire(monkeypatch):
 def test_cli_refuses_a_second_engine_for_the_same_hire():
     processes.record_pid("barbara")  # this test process plays the running engine
     assert cli.main(["resume", "--hire", "barbara"]) == cli.EXIT_ALREADY_RUNNING
+
+
+@pytest.fixture
+def engine(monkeypatch):
+    """Stands in for `dayone.engine.runner` (session 2) and records how the CLI calls it."""
+    calls = []
+    runner = types.ModuleType("dayone.engine.runner")
+    runner.outcome = True
+    for name, base in [("LeaseHeld", RuntimeError), ("HireNotFound", LookupError), ("MachineMismatch", ValueError), ("MachineRequired", ValueError)]:
+        setattr(runner, name, type(name, (base,), {}))
+
+    def run_hire(name, machine, resume):
+        calls.append(("run_hire", name, machine, resume))
+        assert processes.running_pid(name) == os.getpid(), "the engine must be visible as running while it works"
+        if isinstance(runner.outcome, Exception):
+            raise runner.outcome
+        return runner.outcome
+
+    runner.run_hire = run_hire
+    runner.reset = lambda name: calls.append(("reset", name))
+    monkeypatch.setitem(sys.modules, "dayone.engine.runner", runner)
+    runner.calls = calls
+    return runner
+
+
+@pytest.mark.parametrize(("outcome", "code"), [(True, cli.EXIT_OK), (False, cli.EXIT_RUN_FAILED)])
+def test_cli_start_maps_the_engine_result_to_the_exit_code(engine, outcome, code):
+    engine.outcome = outcome
+
+    assert cli.main(["start", "--hire", "ken", "--machine", "alpine"]) == code
+    assert engine.calls == [("run_hire", "ken", Machine.ALPINE, False)]
+    assert processes.running_pid("ken") is None
+
+
+@pytest.mark.parametrize(
+    ("error", "code"),
+    [("LeaseHeld", cli.EXIT_ALREADY_RUNNING), ("HireNotFound", cli.EXIT_NOTHING_TO_RESUME), ("MachineMismatch", cli.EXIT_WRONG_MACHINE)],
+)
+def test_cli_maps_engine_refusals_to_exit_codes_and_clears_the_pid(engine, error, code):
+    engine.outcome = getattr(engine, error)("refused")
+
+    assert cli.main(["resume", "--hire", "ken"]) == code
+    assert not processes.pid_file("ken").exists()
+
+
+def test_cli_lets_unexpected_engine_errors_crash_but_still_clears_the_pid(engine):
+    engine.outcome = KeyError("bug")
+
+    with pytest.raises(KeyError):
+        cli.main(["resume", "--hire", "ken"])
+    assert not processes.pid_file("ken").exists()
+
+
+@pytest.mark.parametrize(("argv", "hire"), [(["reset", "ada"], "ada"), (["reset", "--hire", "ada"], "ada"), (["reset"], None)])
+def test_cli_reset_accepts_positional_and_option(engine, argv, hire):
+    assert cli.main(argv) == cli.EXIT_OK
+    assert engine.calls == [("reset", hire)]

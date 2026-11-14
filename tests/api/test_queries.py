@@ -6,7 +6,7 @@ from dayone.api import queries
 from dayone.contracts import STEP_IDS
 
 
-def test_run_summary_counts_only_this_run(db, event):
+def test_run_summary_counts_this_run_and_the_ledger(db, event):
     db.hires.insert_one({"name": "ada", "machine": "ubuntu"})
     db.events.insert_many(
         [
@@ -14,13 +14,18 @@ def test_run_summary_counts_only_this_run(db, event):
             event("ada", "old", "error_captured", 1, "t_runtime"),
             event("ada", "new", "run_started", 100),
             event("ada", "new", "error_captured", 110, "t_runtime"),
-            event("ada", "new", "fix_attempt", 111, "t_runtime", source="exact_memory", ok=True),
             event("ada", "new", "error_captured", 120, "t_init_db"),
-            event("ada", "new", "fix_attempt", 121, "t_init_db", source="semantic_memory", ok=False),
-            event("ada", "new", "fix_attempt", 125, "t_init_db", source="reasoning", ok=False),
-            event("ada", "new", "fix_attempt", 130, "t_init_db", source="reasoning", ok=True),
             event("ada", "new", "run_resumed", 140),
             event("ada", "new", "run_finished", 652),
+        ]
+    )
+    db.steps.insert_many(
+        [
+            {"hire": "ada", "step_id": "t_runtime", "status": "fixed_from_memory", "fix_source": "exact_memory", "llm_calls": 0},
+            {"hire": "ada", "step_id": "t_system_package", "status": "fixed_from_memory", "fix_source": "semantic_memory", "llm_calls": 0},
+            {"hire": "ada", "step_id": "t_init_db", "status": "fixed_by_reasoning", "fix_source": "reasoning", "llm_calls": 2},
+            {"hire": "ada", "step_id": "t_clone", "status": "verified", "fix_source": None},  # older docs lack llm_calls
+            {"hire": "ken", "step_id": "t_runtime", "status": "fixed_by_reasoning", "fix_source": "reasoning", "llm_calls": 5},
         ]
     )
 
@@ -29,12 +34,36 @@ def test_run_summary_counts_only_this_run(db, event):
 
     assert summary["run_id"] == "new"
     assert summary["machine"] == "ubuntu"
-    assert summary["elapsed_s"] == 552.0
+    assert summary["elapsed_s"] == 552.0  # includes the time the run was killed
     assert summary["errors"] == 2
-    assert summary["fixes_from_memory"] == 1  # the failed semantic attempt does not count
-    assert summary["llm_fix_calls"] == 2
-    assert summary["resumes"] == 1
+    assert summary["fixes_from_memory"] == 2
+    assert summary["llm_calls"] == 2
     assert summary["ok"] is True
+
+
+def test_failed_run_resumed_to_success_is_ok(db, event):
+    db.events.insert_many(
+        [
+            event("ken", "k", "run_started", 0),
+            event("ken", "k", "run_failed", 30),
+            event("ken", "k", "run_resumed", 60),
+            event("ken", "k", "run_finished", 90),
+        ]
+    )
+
+    summary = queries.run_summary(db, "ken")
+
+    assert summary["ok"] is True
+    assert summary["elapsed_s"] == 90.0
+
+
+def test_failed_run_being_resumed_is_unfinished(db, event):
+    db.events.insert_many(
+        [event("ken", "k", "run_started", 0), event("ken", "k", "run_failed", 30), event("ken", "k", "run_resumed", 60)]
+    )
+
+    assert queries.run_summary(db, "ken")["finished_at"] is None
+    assert queries.latest_unfinished_hire(db) == "ken"
 
 
 def test_unfinished_run_has_no_outcome_and_counts_elapsed_to_now(db, event):

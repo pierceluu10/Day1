@@ -160,14 +160,11 @@ h2 { font-size: 1.375rem; font-weight: 700; letter-spacing: -0.01em; }
 .run-state[data-state="failed"] { color: var(--failed); font-weight: 600; }
 .recorded { color: var(--muted); font-style: italic; }
 
-.notice {
-  padding: 0.5rem 0.75rem;
-  border-radius: 6px;
-  background: var(--stale-wash);
-  color: var(--stale);
-  font-weight: 600;
-}
-.notice[data-kind="resume"] { background: var(--pending-wash); color: var(--pending); }
+.notices { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.25rem; font-weight: 600; }
+.notices:empty { display: none; }
+.notices li { padding-left: 0.75rem; border-left: 3px solid currentColor; }
+.notices [data-kind="drift"] { color: var(--stale); }
+.notices [data-kind="resume"], .notices [data-kind="readme"] { color: var(--pending); }
 
 /* Steps: one row per step, status word on the right, evidence underneath */
 .steps { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--rule); }

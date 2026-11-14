@@ -1,7 +1,8 @@
 """Every number and status the page shows, as Atlas queries. QA's acceptance test 7 reuses these.
 
 Reads only the shapes in `dayone.contracts`: `events` documents are `Event` fields, `steps` documents
-are `StepRecord` fields, `hires` documents are `Hire` fields.
+are `StepRecord` fields plus `llm_calls`, `hires` documents are `Hire` fields. The definitions match
+session 7's `tests/acceptance/atlas.py` (see the shared qa-atlas-fields note).
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ STEPS = "steps"
 HIRES = "hires"
 
 RUN_END_TYPES = (EventType.RUN_FINISHED.value, EventType.RUN_FAILED.value)
+LIFECYCLE_TYPES = [EventType.RUN_STARTED.value, EventType.RUN_RESUMED.value, *RUN_END_TYPES]
 MEMORY_SOURCES = (FixSource.EXACT_MEMORY.value, FixSource.SEMANTIC_MEMORY.value)
 
 
@@ -44,60 +46,51 @@ def steps(db: Database, hire: str) -> list[dict[str, Any]]:
 
 
 def latest_run_id(db: Database, hire: str) -> str | None:
-    doc = db[EVENTS].find_one({"hire": hire, "type": EventType.RUN_STARTED.value}, sort=[("_id", DESCENDING)])
+    doc = db[EVENTS].find_one({"hire": hire, "type": EventType.RUN_STARTED.value}, sort=[("ts", DESCENDING), ("_id", DESCENDING)])
     return doc["run_id"] if doc else None
 
 
 def run_summary(db: Database, hire: str, run_id: str | None = None) -> dict[str, Any] | None:
-    """One run's line: elapsed wall time (start to finish, or to now while unfinished), errors, fixes, LLM calls."""
+    """One run's line. elapsed: first RUN_STARTED to the end event (or now while unfinished), killed time included.
+    errors: ERROR_CAPTURED events. fixes_from_memory and llm_calls: the hire's step ledger."""
     run_id = run_id or latest_run_id(db, hire)
     if run_id is None:
         return None
     match = {"hire": hire, "run_id": run_id}
-    counts = next(
-        db[EVENTS].aggregate(
+    started = db[EVENTS].find_one({**match, "type": EventType.RUN_STARTED.value}, sort=[("ts", ASCENDING), ("_id", ASCENDING)])
+    if started is None:
+        return None
+    # A failed run can be resumed: only the latest lifecycle event says whether it is over.
+    last = db[EVENTS].find_one({**match, "type": {"$in": LIFECYCLE_TYPES}}, sort=[("ts", DESCENDING), ("_id", DESCENDING)])
+    finished_at = last["ts"] if last["type"] in RUN_END_TYPES else None
+    ledger = next(
+        db[STEPS].aggregate(
             [
-                {"$match": match},
+                {"$match": {"hire": hire}},
                 {
                     "$group": {
                         "_id": None,
-                        "started_at": {"$min": {"$cond": [{"$eq": ["$type", EventType.RUN_STARTED.value]}, "$ts", None]}},
-                        "finished_at": {"$max": {"$cond": [{"$in": ["$type", list(RUN_END_TYPES)]}, "$ts", None]}},
-                        "failed": {"$max": {"$eq": ["$type", EventType.RUN_FAILED.value]}},
-                        "resumes": {"$sum": {"$cond": [{"$eq": ["$type", EventType.RUN_RESUMED.value]}, 1, 0]}},
-                        "errors": {"$sum": {"$cond": [{"$eq": ["$type", EventType.ERROR_CAPTURED.value]}, 1, 0]}},
-                        "fixes_from_memory": {"$sum": {"$cond": [_fix_attempt_from(MEMORY_SOURCES, ok_only=True), 1, 0]}},
-                        "llm_fix_calls": {"$sum": {"$cond": [_fix_attempt_from((FixSource.REASONING.value,)), 1, 0]}},
+                        "fixes_from_memory": {"$sum": {"$cond": [{"$in": ["$fix_source", list(MEMORY_SOURCES)]}, 1, 0]}},
+                        "llm_calls": {"$sum": {"$ifNull": ["$llm_calls", 0]}},
                     }
                 },
             ]
         ),
-        None,
+        {"fixes_from_memory": 0, "llm_calls": 0},
     )
-    if counts is None or counts["started_at"] is None:
-        return None
     hire_doc = db[HIRES].find_one({"name": hire}, {"machine": 1}) or {}
-    end = counts["finished_at"] or datetime.now(UTC)
     return {
         "hire": hire,
         "machine": hire_doc.get("machine"),
         "run_id": run_id,
-        "started_at": counts["started_at"],
-        "finished_at": counts["finished_at"],
-        "ok": None if counts["finished_at"] is None else not counts["failed"],
-        "elapsed_s": round((end - counts["started_at"]).total_seconds(), 1),
-        "resumes": counts["resumes"],
-        "errors": counts["errors"],
-        "fixes_from_memory": counts["fixes_from_memory"],
-        "llm_fix_calls": counts["llm_fix_calls"],
+        "started_at": started["ts"],
+        "finished_at": finished_at,
+        "ok": None if finished_at is None else last["type"] == EventType.RUN_FINISHED.value,
+        "elapsed_s": round(((finished_at or datetime.now(UTC)) - started["ts"]).total_seconds(), 1),
+        "errors": db[EVENTS].count_documents({**match, "type": EventType.ERROR_CAPTURED.value}),
+        "fixes_from_memory": ledger["fixes_from_memory"],
+        "llm_calls": ledger["llm_calls"],
     }
-
-
-def _fix_attempt_from(sources: tuple[str, ...], ok_only: bool = False) -> dict[str, Any]:
-    conditions: list[Any] = [{"$eq": ["$type", EventType.FIX_ATTEMPT.value]}, {"$in": ["$data.source", list(sources)]}]
-    if ok_only:
-        conditions.append({"$eq": ["$data.ok", True]})
-    return {"$and": conditions}
 
 
 def first_finished_hire(db: Database) -> tuple[str, str] | None:

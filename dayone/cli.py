@@ -14,6 +14,7 @@ EXIT_RUN_FAILED = 1  # argparse exits 2 on bad arguments
 EXIT_NOTHING_TO_RESUME = 3
 EXIT_ALREADY_RUNNING = 4
 EXIT_MISSING_SETTING = 5
+EXIT_WRONG_MACHINE = 6
 
 API_HOST = "127.0.0.1"
 
@@ -27,7 +28,8 @@ def _parser() -> argparse.ArgumentParser:
     resume = commands.add_parser("resume", help="resume a hire's run (default: the most recent unfinished one)")
     resume.add_argument("--hire", choices=HIRES)
     reset = commands.add_parser("reset", help="forget a hire's run (default: every hire)")
-    reset.add_argument("--hire", choices=HIRES)
+    reset.add_argument("hire", nargs="?", choices=HIRES)  # `dayone reset ada` and `dayone reset --hire ada` both work
+    reset.add_argument("--hire", dest="hire_option", choices=HIRES)
     commands.add_parser("serve", help="serve the page and API")
     return parser
 
@@ -44,11 +46,21 @@ def _run(hire: str, machine: Machine | None, resume: bool) -> int:
     if (pid := processes.running_pid(hire)) is not None:
         print(f"dayone: {hire} is already running (pid {pid})", file=sys.stderr)
         return EXIT_ALREADY_RUNNING
-    from dayone.engine.runner import run_hire  # engine imports Playwright and Docker wiring; `serve` never needs it
+    # The engine pulls in Playwright and Docker wiring; `serve` never needs it.
+    from dayone.engine.runner import HireNotFound, LeaseHeld, MachineMismatch, MachineRequired, run_hire
 
     processes.record_pid(hire)
     try:
         return EXIT_OK if run_hire(hire, machine, resume) else EXIT_RUN_FAILED
+    except LeaseHeld as error:
+        print(f"dayone: {error}", file=sys.stderr)
+        return EXIT_ALREADY_RUNNING
+    except HireNotFound as error:
+        print(f"dayone: {error}", file=sys.stderr)
+        return EXIT_NOTHING_TO_RESUME
+    except (MachineMismatch, MachineRequired) as error:
+        print(f"dayone: {error}", file=sys.stderr)
+        return EXIT_WRONG_MACHINE
     finally:
         processes.clear_pid(hire)
 
@@ -58,9 +70,13 @@ def _reset(hire: str | None) -> int:
     if busy:
         print(f"dayone: stop the running engine first: {busy}", file=sys.stderr)
         return EXIT_ALREADY_RUNNING
-    from dayone.engine.runner import reset
+    from dayone.engine.runner import LeaseHeld, reset
 
-    reset(hire)
+    try:
+        reset(hire)
+    except LeaseHeld as error:
+        print(f"dayone: {error}", file=sys.stderr)
+        return EXIT_ALREADY_RUNNING
     return EXIT_OK
 
 
@@ -84,7 +100,7 @@ def main(argv: list[str] | None = None) -> int:
                     return EXIT_NOTHING_TO_RESUME
                 return _run(hire, None, resume=True)
             case "reset":
-                return _reset(args.hire)
+                return _reset(args.hire or args.hire_option)
             case "serve":
                 return _serve()
     except MissingSetting as error:
