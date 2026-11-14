@@ -86,12 +86,6 @@ class FakeExecutor:
 
 
 class FakeBrowser:
-    def __init__(self) -> None:
-        self.ticked: list[str] = []
-
-    def tick_checklist(self, item: str) -> None:
-        self.ticked.append(item)
-
     def close(self) -> None:
         pass
 

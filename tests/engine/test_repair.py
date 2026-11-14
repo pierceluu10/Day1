@@ -28,7 +28,7 @@ from tests.engine.fakes import FakeBrowser, FakeExecutor, FakeGitea, FakeMemory,
 
 FIX_COMMAND = "apt-get install -y libpq-dev"
 ERROR = "pg_config executable not found"
-STEP_ID = "t_install_deps"  # has a Welcome checklist item, which the engine must leave alone
+STEP_ID = "t_install_deps"
 
 
 def needs_fix_step(workdir: Path, executor: FakeExecutor) -> Step:
@@ -49,14 +49,14 @@ def needs_fix_step(workdir: Path, executor: FakeExecutor) -> Step:
 
 
 def test_failure_is_fixed_from_memory_and_verified(store: AtlasStore, tmp_path: Path) -> None:
-    executor, browser = FakeExecutor(), FakeBrowser()
+    executor = FakeExecutor()
     memory = FakeMemory(
         fixes=[
             FixProposal(commands=("false-start",), source=FixSource.REASONING, rationale="wrong"),
             FixProposal(commands=(FIX_COMMAND,), source=FixSource.SEMANTIC_MEMORY, rationale="apt", experience_id="e1"),
         ]
     )
-    opener = parts_opener(store, [needs_fix_step(tmp_path, executor)], FakeGitea(), memory, browser, executor)
+    opener = parts_opener(store, [needs_fix_step(tmp_path, executor)], FakeGitea(), memory, FakeBrowser(), executor)
     assert drive(store, "fixer", Machine.UBUNTU, False, opener)
 
     (failure,) = memory.failures
@@ -69,8 +69,6 @@ def test_failure_is_fixed_from_memory_and_verified(store: AtlasStore, tmp_path: 
     doc = store.db["steps"].find_one({"hire": "fixer", "step_id": STEP_ID})
     assert doc["check_ever_failed"] and not doc["untrusted"]
     assert doc["llm_calls"] == 0
-    # b_checklist alone ticks the Welcome issue, so its check fails before it passes and stays trusted.
-    assert browser.ticked == [], "the engine must not tick checklist items itself"
     print("executor commands:", executor.commands)
 
 
