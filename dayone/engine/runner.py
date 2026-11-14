@@ -23,7 +23,6 @@ from pymongo.errors import PyMongoError
 from dayone.config import settings
 from dayone.contracts import (
     DONE_STATUSES,
-    HIRES,
     REPO,
     REPO_BRANCH,
     REPO_DIR,
@@ -48,6 +47,7 @@ from dayone.contracts import (
     container_name,
     idempotency_key,
 )
+from dayone.store.atlas import AtlasStore
 
 log = logging.getLogger(__name__)
 
@@ -100,6 +100,12 @@ class Parts:
 
 
 OpenParts = Callable[[Hire], AbstractContextManager[Parts]]
+
+
+@dataclass(frozen=True)
+class ResetParts:
+    reset_gitea: Callable[[str], None]  # delete the hire's SSH keys, untick their Welcome issue
+    remove_container: Callable[[Hire], None]
 
 
 class Lease:
@@ -162,19 +168,35 @@ def run_hire(name: str, machine: Machine | None, resume: bool) -> bool:
 
 
 def reset(name: str | None) -> None:
-    """Forget a hire (or every hire): its container, steps, events and hire doc. Experiences are kept."""
+    """Return a hire (or every hire in Atlas) to day zero. Experiences are kept: they are the point."""
     from dayone.engine import wiring
 
     config = settings()
     with wiring.open_store(config) as store:
-        for hire_name in [name] if name else list(HIRES):
-            owner = f"reset:{os.getpid()}"
-            if not store.acquire_lease(hire_name, owner, LEASE_TTL_S):
-                raise LeaseHeld(f"{hire_name} is being run; stop it before resetting")
-            hire = store.get_hire(hire_name)
-            if hire is not None:
-                wiring.remove_container(config, store, hire)
-            store.reset_hire(hire_name)  # deletes the hire doc, and with it the lease
+        reset_hires(store, name, wiring.reset_parts(config, store))
+
+
+def reset_hires(store: AtlasStore, name: str | None, parts: ResetParts) -> list[str]:
+    """Gitea keys and Welcome ticks, container, then the Atlas ledger, so the next run's checks fail before they pass.
+
+    Every lease is taken before anything is touched: a hire that is being run makes the whole reset refuse.
+    """
+    names = [name] if name else store.hire_names()
+    owner = f"reset:{socket.gethostname()}:{os.getpid()}"
+    taken: list[str] = []
+    for hire_name in names:
+        if not store.acquire_lease(hire_name, owner, LEASE_TTL_S):
+            for held in taken:
+                store.release_lease(held, owner)
+            raise LeaseHeld(f"{hire_name} is being run; stop it before resetting")
+        taken.append(hire_name)
+    for hire_name in names:
+        parts.reset_gitea(hire_name)
+        hire = store.get_hire(hire_name)
+        if hire is not None:  # no hire doc means the engine never created a container for it
+            parts.remove_container(hire)
+        store.reset_hire(hire_name)  # deletes the hire doc, and with it the lease
+    return names
 
 
 def drive(store: Store, name: str, machine: Machine | None, resume: bool, open_parts: OpenParts) -> bool:
