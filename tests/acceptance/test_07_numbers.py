@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import socket
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from collections.abc import Iterator
 from typing import Any
 
@@ -46,6 +46,30 @@ def numeric_leaves(value: Any, path: str = "") -> Iterator[tuple[str, float]]:
     elif isinstance(value, list):
         for index, item in enumerate(value):
             yield from numeric_leaves(item, f"{path}[{index}]")
+
+
+def as_served(value: Any) -> Any:
+    """An Atlas value as JSON shows it: datetimes (stored naive UTC) as ISO strings, compared as instants below."""
+    if isinstance(value, datetime):
+        return Instant(value.replace(tzinfo=timezone.utc))
+    if isinstance(value, dict):
+        return {key: as_served(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [as_served(item) for item in value]
+    return value
+
+
+class Instant:
+    """Equal to any ISO string naming the same moment, whatever its offset format."""
+
+    def __init__(self, moment: datetime) -> None:
+        self.moment = moment
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, str) and datetime.fromisoformat(other) == self.moment
+
+    def __repr__(self) -> str:
+        return self.moment.isoformat()
 
 
 def dicts_with(value: Any, key: str) -> Iterator[dict[str, Any]]:
@@ -116,7 +140,5 @@ def test_api_numbers_match_atlas(onboard, db, api, hires):
             assert {"status", "evidence"} <= step.keys(), step
             for key in step.keys():
                 assert key in doc or not isinstance(step[key], int | float), f"{hire}/{step['step_id']}.{key} is not an Atlas field"
-                if key in doc and isinstance(doc[key], datetime):
-                    assert datetime.fromisoformat(step[key]).replace(tzinfo=None) == doc[key], f"{hire}/{step['step_id']}.{key}"
-                elif key in doc:
-                    assert step[key] == doc[key], f"{hire}/{step['step_id']}.{key}: API {step[key]!r} vs Atlas {doc[key]!r}"
+                if key in doc:
+                    assert as_served(doc[key]) == step[key], f"{hire}/{step['step_id']}.{key}: API {step[key]!r} vs Atlas {doc[key]!r}"
