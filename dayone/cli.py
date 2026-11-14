@@ -41,11 +41,11 @@ def _unfinished_hire() -> str | None:
 
 
 def _run(hire: str, machine: Machine | None, resume: bool) -> int:
-    from dayone.engine.runner import run_hire  # engine imports Playwright and Docker wiring; `serve` never needs it
-
     if (pid := processes.running_pid(hire)) is not None:
         print(f"dayone: {hire} is already running (pid {pid})", file=sys.stderr)
         return EXIT_ALREADY_RUNNING
+    from dayone.engine.runner import run_hire  # engine imports Playwright and Docker wiring; `serve` never needs it
+
     processes.record_pid(hire)
     try:
         return EXIT_OK if run_hire(hire, machine, resume) else EXIT_RUN_FAILED
@@ -54,12 +54,12 @@ def _run(hire: str, machine: Machine | None, resume: bool) -> int:
 
 
 def _reset(hire: str | None) -> int:
-    from dayone.engine.runner import reset
-
     busy = [(name, pid) for name in ([hire] if hire else HIRES) if (pid := processes.running_pid(name)) is not None]
     if busy:
         print(f"dayone: stop the running engine first: {busy}", file=sys.stderr)
         return EXIT_ALREADY_RUNNING
+    from dayone.engine.runner import reset
+
     reset(hire)
     return EXIT_OK
 

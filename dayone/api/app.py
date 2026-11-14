@@ -103,9 +103,9 @@ def compare(hire: KnownHire) -> dict[str, Any]:
     return _jsonable(queries.compare(app.state.db, hire))
 
 
-@app.get("/api/steps")
-def step_order() -> list[str]:
-    return list(STEP_IDS)
+@app.get("/api/config")
+def config() -> dict[str, list[str]]:
+    return {"steps": list(STEP_IDS), "hires": list(HIRES)}
 
 
 @app.get("/api/hires/{hire}/events", response_class=EventSourceResponse)

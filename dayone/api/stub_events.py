@@ -276,7 +276,7 @@ def scenario_resume(db: Database, speed: float) -> None:
         stale = ["t_clone", "t_install_deps"]
         for step_id in stale:
             ledger.set_step(step_id, status=StepStatus.STALE.value)
-        ledger.emit(EventType.DRIFT_DETECTED, "t_install_deps", step_id="t_install_deps", reason="requirements.txt changed upstream")
+        ledger.emit(EventType.DRIFT_DETECTED, "t_install_deps", reason="requirements.txt changed upstream")
         ledger.wait(1)
         ledger.set_step("t_clone", status=StepStatus.PENDING.value, runs=1)
         ledger.terminal("t_clone", "git pull --ff-only", [f"Updating {HEAD_BEFORE}..{HEAD_AFTER}", " requirements.txt | 1 +"])
