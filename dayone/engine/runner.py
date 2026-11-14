@@ -49,6 +49,7 @@ from dayone.contracts import (
     container_name,
     idempotency_key,
 )
+from dayone.gitea import GiteaError, GiteaUnreachable
 from dayone.memory.experience import FIX_OUTPUT
 from dayone.store.atlas import AtlasStore
 
@@ -241,8 +242,19 @@ class Run:
         self.parts.executor.ensure_container()
         ok = self._converge()
         self.store.finish_hire(self.hire.name, ok)
-        self.events.emit(EventType.RUN_FINISHED if ok else EventType.RUN_FAILED)
+        if ok:
+            self.events.emit(EventType.RUN_FINISHED, **self._close_loop())
+        else:
+            self.events.emit(EventType.RUN_FAILED)
         return ok
+
+    def _close_loop(self) -> dict[str, object]:
+        """Propose README changes for fixes 2+ hires needed. A side effect of a green run, never a reason to fail it."""
+        try:
+            return {"readme_issues": self.parts.memory.close_loop()}
+        except (GiteaError, GiteaUnreachable) as error:
+            log.warning("could not open README issues for %s", self.hire.name, exc_info=error)
+            return {"readme_issues": [], "close_loop_error": f"{type(error).__name__}: {error}"}
 
     def _converge(self) -> bool:
         for _ in range(MAX_PASSES):
