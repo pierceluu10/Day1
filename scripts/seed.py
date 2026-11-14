@@ -14,8 +14,8 @@ import time
 from pathlib import Path
 
 from dayone.config import ROOT, settings
-from dayone.contracts import HIRES, REPO, REPO_BRANCH, WELCOME_CHECKLIST, WELCOME_ISSUE_TITLE
-from dayone.gitea import GiteaClient, GiteaError, GiteaNotFound, read_admin_token
+from dayone.contracts import HIRES, REPO, REPO_BRANCH, WELCOME_ISSUE_TITLE
+from dayone.gitea import GiteaClient, GiteaError, GiteaNotFound, read_admin_token, welcome_body
 
 ORG, REPO_NAME = REPO.split("/")
 TEAM = "engineering"
@@ -29,11 +29,6 @@ INITIAL_COMMIT_MESSAGE = "acme-api 1.4.0"
 COMMIT_DATE = "2026-11-02T09:00:00+00:00"
 FIRST_PUSH_ATTEMPTS = 20
 FIRST_PUSH_POLL_S = 0.5
-
-
-def welcome_body() -> str:
-    items = "\n".join(f"- [ ] {item}" for item in WELCOME_CHECKLIST.values())
-    return f"Welcome to the engineering team! Work through this list on your first day.\n\n{items}\n"
 
 
 def exists(gitea: GiteaClient, path: str) -> bool:
