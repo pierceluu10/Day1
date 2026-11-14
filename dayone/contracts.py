@@ -23,7 +23,7 @@ class Machine(StrEnum):
 
 
 MACHINE_IMAGES: dict[Machine, str] = {
-    Machine.UBUNTU: "ubuntu:22.04",
+    Machine.UBUNTU: "dayone-hire-ubuntu:22.04",  # built by scripts/up.sh from infra/hire/ubuntu.Dockerfile
     Machine.DEBIAN: "debian:12",
     Machine.ALPINE: "alpine:3.20",
 }

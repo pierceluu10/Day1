@@ -20,6 +20,7 @@ gitea_cli() { docker exec -u git "$CONTAINER" gitea "$@"; }
 
 docker network inspect "$NETWORK" >/dev/null 2>&1 || docker network create "$NETWORK" >/dev/null
 docker compose -f "$COMPOSE_FILE" up -d --wait
+docker build -q -t dayone-hire-ubuntu:22.04 -f "$ROOT/infra/hire/ubuntu.Dockerfile" "$ROOT/infra/hire" >/dev/null
 
 for _ in $(seq "$READY_ATTEMPTS"); do
   curl -fsS "$GITEA_URL/api/v1/version" >/dev/null 2>&1 && break
