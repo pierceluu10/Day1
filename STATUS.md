@@ -17,6 +17,21 @@ Integration branch: `claude/day-one-mongodb-agent-6cc839` (orchestrator session)
 
 `dayone/steps/__init__.py` (the ordered `STEPS` list built from `STEP_IDS`) is written by the orchestrator at integration from sessions 3 and 4's step modules.
 
+## Concrete classes the engine wires together (names and constructors are fixed)
+
+| Contract | Class | Constructor |
+|---|---|---|
+| `Store` | `dayone.store.atlas.AtlasStore` | `AtlasStore(settings)`; also exposes `.db` (pymongo Database) |
+| `EventBus` | `dayone.store.events.AtlasEventBus` | `AtlasEventBus(db, hire: Hire)` |
+| `Gitea` | `dayone.gitea.GiteaClient` | `GiteaClient(settings)` (admin token from `.dayone/gitea_admin_token`) |
+| `Executor` | `dayone.terminal.docker.DockerExecutor` | `DockerExecutor(hire: Hire, events: EventBus, timeout_s: float)` |
+| fingerprint | `dayone.terminal.fingerprint.fingerprint` | `fingerprint(error_text: str) -> str` |
+| `BrowserSession` | `dayone.browser.session.PlaywrightSession` | `PlaywrightSession(hire: Hire, settings, events: EventBus, memory: Memory)` (Chromium starts lazily on first browser step) |
+| `Memory` | `dayone.memory.experience.ExperienceMemory` | `ExperienceMemory(db, llm: LLM, embedder: Embedder, events: EventBus, gitea: Gitea, settings)` |
+| `LLM` / `Embedder` | `dayone.llm.anthropic.AnthropicLLM` / `dayone.llm.voyage.VoyageEmbedder` | `(settings)` |
+| steps | `dayone.steps.terminal_steps.TERMINAL_STEPS`, `dayone.steps.browser_steps.BROWSER_STEPS` | `dict[str, Step]` keyed by step id |
+| engine | `dayone.engine.runner.run_hire` | `run_hire(name: str, machine: Machine \| None, resume: bool) -> bool`; `dayone.engine.runner.reset(name: str \| None)` |
+
 ## Shared resources (do not trample each other)
 
 | Resource | Rule |
