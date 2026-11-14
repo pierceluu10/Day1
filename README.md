@@ -111,6 +111,6 @@ uv run python -u -m pytest --acceptance tests/acceptance -v -s     # real contai
 
 Built today in this repo: the agent (engine, ledger, memory, browser and terminal steps), the page and API, the demo repository `acme-api` and its four snags, the Gitea seed and scripts, the overlay, and the acceptance tests. Third-party: Gitea, Playwright, FastAPI, pymongo, Claude (reasoning and adapting) and Voyage `voyage-3.5` (embeddings via Atlas).
 
-Pre-recorded for the demo: the runs of ada, grace and linus are made before the demo so that memory holds real fixes from today, and the page labels them with when they finished ("recorded earlier today at …"). Barbara (kill, resume, mid-run change) and ken (Alpine) run live.
+Pre-recorded for the demo: the runs of ada, grace and linus are made before the demo so that memory holds real fixes from today, and the page labels them with when they finished ("finished earlier today at" and the time). Barbara (kill, resume, mid-run change) and ken (Alpine) run live.
 
 Not done: TBD.
