@@ -3,6 +3,7 @@
 Mutates Gitea: push_change.sh commits to acme/acme-api (scripts/reset.sh restores the repo).
 """
 
+import re
 import subprocess
 
 import pytest
@@ -22,6 +23,7 @@ pytestmark = [
 
 CHANGE_AFTER = "t_clone"
 RE_VERIFIED = ("t_clone", "t_install_deps", "t_run_tests")
+ALL_PASSED = re.compile(r"(\d+) passed of (\d+)")
 
 
 def test_mid_run_repository_change_is_detected_and_handled(onboard, db, gitea, log_dir, fresh_hire, hires):
@@ -60,6 +62,10 @@ def test_mid_run_repository_change_is_detected_and_handled(onboard, db, gitea, l
     drift_at = drift[0][0]
     assert any((to := event["data"].get("to")) and head_after.startswith(to) for _, event in drift), f"no drift event names the new HEAD {head_after}"
 
+    stale = {event["step_id"] for event in events[drift_at:] if event["type"] == EventType.STEP_STATUS and event["data"].get("status") == StepStatus.STALE}
+    print(f"marked stale after drift: {sorted(stale)}")
+    assert set(RE_VERIFIED) <= stale, f"not marked stale after drift: {set(RE_VERIFIED) - stale}"
+
     for step_id in RE_VERIFIED:
         assert any(
             event["type"] == EventType.STEP_STATUS and event.get("step_id") == step_id and event["data"].get("status") in DONE_STATUSES
@@ -75,6 +81,10 @@ def test_mid_run_repository_change_is_detected_and_handled(onboard, db, gitea, l
     for step_id in STEP_IDS:
         assert steps[step_id]["status"] in DONE_STATUSES, (step_id, steps[step_id]["status"])
         assert steps[step_id]["status"] != StepStatus.STALE
+    tests = ALL_PASSED.search(steps["t_run_tests"]["evidence"])
+    assert tests and tests.group(1) == tests.group(2), steps["t_run_tests"]["evidence"]
+    for event in errors_after:
+        print(f"fixed {event['step_id']} with {steps[event['step_id']]['status']}: {event['data'].get('error_text', '')[-300:]}")
     local = container_exec(hire, f"git -C {REPO_DIR} rev-parse HEAD")
     assert local.stdout.strip() == head_after, f"container HEAD {local.stdout.strip()} != API HEAD {head_after}"
     assert of_type(events, EventType.RUN_FINISHED)
