@@ -1,4 +1,6 @@
 import subprocess
+import sys
+import time
 
 import pytest
 
@@ -62,3 +64,42 @@ def test_facts_on_an_empty_machine(executor):
     assert (facts.os_family, facts.package_manager) == (family, package_manager)
     assert facts.os_version.startswith(version)
     assert "git" not in facts.tools and "ssh" not in facts.tools
+
+
+ORPHAN_WAIT_S = 20.0
+POLL_S = 0.2
+ORPHAN_SCRIPT = """
+import sys
+from dayone.contracts import Hire, Machine
+from dayone.terminal.docker import DockerExecutor
+
+class Bus:
+    def emit(self, *args, **data):
+        pass
+
+executor = DockerExecutor(Hire("dev3", Machine(sys.argv[1]), sys.argv[2], "orphan"), Bus(), 60)
+executor.exec("sleep 300", 600)
+"""
+
+
+def _commands(executor) -> str:
+    return executor.exec("cat /proc/[0-9]*/cmdline 2>/dev/null | tr '\\0' ' '", COMMAND_TIMEOUT_S).output
+
+
+def test_resume_kills_commands_left_running_by_a_killed_agent(executor, make_executor):
+    agent = subprocess.Popen([sys.executable, "-c", ORPHAN_SCRIPT, executor.hire.machine.value, UNIT_CONTAINER])
+    deadline = time.monotonic() + ORPHAN_WAIT_S
+    while "sleep 300" not in _commands(executor):
+        assert time.monotonic() < deadline, "the agent's command never started"
+        time.sleep(POLL_S)
+    agent.kill()  # kill -9 of the agent: docker exec dies with it, the command inside does not
+    agent.wait()
+    assert "sleep 300" in _commands(executor), "the command died with the agent; nothing to clean up"
+
+    resumed = make_executor(executor.hire.machine, UNIT_CONTAINER)
+    resumed.ensure_container()
+    left = _commands(resumed)
+    print(left)
+    assert "sleep 300" not in left
+    # Only the listing's own pidfile may exist.
+    assert resumed.exec("ls /tmp/dayone-exec-*.pid", COMMAND_TIMEOUT_S).output.count(".pid") == 1
