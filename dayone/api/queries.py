@@ -39,6 +39,33 @@ def events_after(db: Database, hire: str, after: ObjectId | None, limit: int) ->
     return list(db[EVENTS].find(query).sort("_id", ASCENDING).limit(limit))
 
 
+def replay(db: Database, hire: str, terminal_lines: int) -> list[dict[str, Any]]:
+    """A hire's history for a page that just opened: every event except old terminal output, of which only the
+    chunks holding the last `terminal_lines` lines. In emit order; ends with the hire's newest event, so the
+    live stream continues after it. The line count runs in Atlas: the skipped output never crosses the network."""
+    newest = db[EVENTS].find_one({"hire": hire}, {"_id": 1}, sort=[("_id", DESCENDING)])
+    if newest is None:
+        return []
+    upto = {"hire": hire, "_id": {"$lte": newest["_id"]}}
+    terminal = EventType.TERMINAL_OUTPUT.value
+    state = list(db[EVENTS].find({**upto, "type": {"$ne": terminal}}))
+    tail = db[EVENTS].aggregate(
+        [
+            {"$match": {**upto, "type": terminal}},
+            {"$set": {"_lines": {"$subtract": [{"$size": {"$split": ["$data.chunk", "\n"]}}, 1]}}},  # newlines in the chunk
+            {
+                "$setWindowFields": {
+                    "sortBy": {"_id": -1},
+                    "output": {"_newer_lines": {"$sum": "$_lines", "window": {"documents": ["unbounded", -1]}}},
+                }
+            },
+            {"$match": {"$expr": {"$lt": [{"$ifNull": ["$_newer_lines", 0]}, terminal_lines]}}},
+            {"$unset": ["_lines", "_newer_lines"]},
+        ]
+    )
+    return sorted([*state, *tail], key=lambda doc: doc["_id"])
+
+
 def steps(db: Database, hire: str) -> list[dict[str, Any]]:
     """All steps in run order; a step the ledger has not seen yet is `not_started`."""
     found = {doc["step_id"]: doc for doc in db[STEPS].find({"hire": hire}, {"_id": 0})}

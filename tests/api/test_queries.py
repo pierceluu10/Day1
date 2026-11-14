@@ -101,6 +101,33 @@ def test_events_after_is_scoped_to_the_hire(db, event):
     assert [doc["hire"] for doc in queries.events_after(db, "ken", None, limit=10)] == ["ken"]
 
 
+def test_replay_keeps_every_state_event_but_only_the_terminal_tail(db, event):
+    db.events.insert_many(
+        [
+            event("ada", "a", "run_started", 0),
+            *[event("ada", "a", "terminal_output", 1, chunk=f"old {i}\nold {i}b\n") for i in range(50)],
+            event("ada", "a", "error_captured", 2, "t_runtime"),
+            *[event("ada", "a", "terminal_output", 3, chunk=f"new {i}\n") for i in range(3)],
+            event("ada", "a", "run_finished", 4),
+            event("ken", "k", "terminal_output", 4, chunk="other hire\n"),
+        ]
+    )
+
+    replayed = queries.replay(db, "ada", terminal_lines=6)
+    print([(doc["type"], doc["data"].get("chunk")) for doc in replayed])
+
+    assert [doc["type"] for doc in replayed if doc["type"] != "terminal_output"] == ["run_started", "error_captured", "run_finished"]
+    chunks = [doc["data"]["chunk"] for doc in replayed if doc["type"] == "terminal_output"]
+    # The fewest newest chunks that hold 6 lines: 3 one-line chunks, then two 2-line chunks.
+    assert chunks == ["old 48\nold 48b\n", "old 49\nold 49b\n", "new 0\n", "new 1\n", "new 2\n"]
+    assert replayed[-1]["type"] == "run_finished"
+    assert replayed == sorted(replayed, key=lambda doc: doc["_id"])
+
+
+def test_replay_of_a_hire_without_events_is_empty(db):
+    assert queries.replay(db, "ada", terminal_lines=200) == []
+
+
 def test_steps_are_in_run_order_and_unseen_steps_are_not_started(db):
     db.steps.insert_one({"hire": "ada", "step_id": "t_clone", "status": "verified", "run_count": 1, "evidence": "HEAD ok"})
 

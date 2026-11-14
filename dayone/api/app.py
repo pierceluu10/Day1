@@ -22,6 +22,8 @@ from dayone.contracts import HIRES, STEP_IDS, Machine
 WEB_DIR = ROOT / "web"
 POLL_INTERVAL_S = 0.4
 EVENT_BATCH = 500
+# A page opening a run gets the step state in full but only this much of the old terminal output.
+REPLAY_TERMINAL_LINES = 200
 SSE_EVENT = "dayone"  # one Atlas event
 SSE_PROCESS = "process"  # the engine process for this hire started or stopped
 
@@ -113,6 +115,10 @@ async def hire_events(
     hire: KnownHire, after: Annotated[ObjectId | None, Depends(_last_event_id)]
 ) -> AsyncIterator[ServerSentEvent]:
     running: bool | None = None
+    if after is None:
+        for doc in await asyncio.to_thread(queries.replay, app.state.db, hire, REPLAY_TERMINAL_LINES):
+            after = doc["_id"]
+            yield ServerSentEvent(id=str(after), event=SSE_EVENT, data=_jsonable(doc))
     while True:
         batch = await asyncio.to_thread(queries.events_after, app.state.db, hire, after, EVENT_BATCH)
         for doc in batch:
