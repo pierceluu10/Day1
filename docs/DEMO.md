@@ -46,7 +46,7 @@ Gitea is reset and hires 1 to 3 are run between 15:15 and 16:00 so the memory in
 | Database init | `sqlite3.OperationalError: no such table: users` (10 errors, 3 passed) | `python -m acme_api.db init` (prints `created schema for sqlite:///acme.db`), then `13 passed` | same | same |
 | Mid-run change (`scripts/push_change.sh`): adds `python-ldap==3.4.8` (sdist only on PyPI) and `tests/test_directory.py` | `Modules/common.h:15:10: fatal error: lber.h: No such file or directory` | `apt-get install -y libldap2-dev libsasl2-dev`, then `14 passed` | same as Ubuntu (not run on Debian) | `apk add openldap-dev`, then `14 passed` |
 
-Proven at 13:30–14:15 in fresh `ubuntu:22.04` and `alpine:3.20` containers (Debian 12 for the runtime row only). Test count: 13 at seed, 14 after `push_change.sh`. pytest shows one harmless starlette deprecation warning.
+Proven in fresh `ubuntu:22.04` and `alpine:3.20` containers (Debian 12 for the runtime row only). Test count: 13 at seed, 14 after `push_change.sh`. pytest shows one harmless starlette deprecation warning.
 
 Exact names and versions are the infra session's call; this table is updated to match what really fails.
 
