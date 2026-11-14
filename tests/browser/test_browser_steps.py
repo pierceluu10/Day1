@@ -17,22 +17,9 @@ from dayone.browser.session import Action
 from dayone.contracts import GITEA_HOSTNAME, LocatorHint, REPO, REPO_DIR, WELCOME_CHECKLIST
 from dayone.steps.browser_steps import BROWSER_STEPS
 
-from conftest import HIRE, ClaudeLLM, DictMemory, RecordingEvents
+from conftest import HIRE, CountingLLM, DictMemory, RecordingEvents, reconcile
 
 CLONE = f"GIT_SSH_COMMAND='ssh -o StrictHostKeyChecking=accept-new' git clone git@{GITEA_HOSTNAME}:{REPO}.git {REPO_DIR}"
-
-
-def reconcile(step_id, ctx):
-    """What the engine does: check, run, check. Returns (check before, check after)."""
-    step = BROWSER_STEPS[step_id]
-    before = step.check(ctx)
-    print(step_id, "before:", before)
-    assert not before.ok, f"{step_id} check passed before run: it cannot tell done from not done"
-    run = step.run(ctx)
-    print(step_id, "run:", run)
-    after = step.check(ctx)
-    print(step_id, "after:", after)
-    return before, after
 
 
 def sign_in(make_context, memory, events):
@@ -84,7 +71,7 @@ def test_sign_in_survives_browser_restart(clean_hire, make_context):
 
 def test_moved_element_is_recovered_by_reasoning_and_saved(clean_hire, make_context, screenshots):
     memory, events = DictMemory(), RecordingEvents()
-    llm = ClaudeLLM()
+    llm = CountingLLM()
     signed_in = sign_in(make_context, memory, events)
     browser = signed_in.browser
     browser._llm = llm
