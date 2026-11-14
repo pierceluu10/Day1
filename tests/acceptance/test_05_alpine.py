@@ -1,6 +1,7 @@
 """Acceptance 5: on Alpine (never seen), at least one fix is retrieved semantically from an apt experience and adapted to apk."""
 
 import json
+import re
 
 import pytest
 
@@ -12,6 +13,7 @@ pytestmark = [pytest.mark.system, requires_system]
 
 SOURCE_MANAGER = "apt"
 TARGET_MANAGER = "apk"
+INSTALLS_WITH = {manager: re.compile(rf"\b{manager}(-get)?\s+(add|install)\b") for manager in (SOURCE_MANAGER, TARGET_MANAGER)}
 
 
 FIXED_STATUSES = frozenset({StepStatus.FIXED_FROM_MEMORY.value, StepStatus.FIXED_BY_REASONING.value})
@@ -24,6 +26,10 @@ def searchable(step_id: str) -> dict:
 def adapted_from(data: dict, manager: str) -> bool:
     """`adapted_from` names the source machine, e.g. "apt" or "ubuntu 22.04, apt"."""
     return manager in (data.get("adapted_from") or "").replace(",", " ").split()
+
+
+def installs(commands: list[str], manager: str) -> bool:
+    return any(INSTALLS_WITH[manager].search(command) for command in commands)
 
 
 def test_alpine_adapts_an_apt_fix_found_by_vector_search(onboard, db, hires):
@@ -72,7 +78,11 @@ def test_alpine_adapts_an_apt_fix_found_by_vector_search(onboard, db, hires):
         assert isinstance(data["similarity"], float) and 0 < data["similarity"] <= 1, data
         assert data["source_hire"] == original["hire"] != hire, (data, original["hire"])
         assert SOURCE_MANAGER in json.dumps(original["context"], default=str), original["context"]
-        assert any(TARGET_MANAGER in command for command in data["commands"]), data["commands"]
+        # A fix with no package install (copy a file, init the db) carries over unchanged; one that installs must switch.
+        if not installs(original["fix_commands"], SOURCE_MANAGER):
+            continue
+        assert installs(data["commands"], TARGET_MANAGER), f"{hit['step_id']}: {original['fix_commands']} -> {data['commands']}"
+        assert not installs(data["commands"], SOURCE_MANAGER), f"{hit['step_id']}: still uses {SOURCE_MANAGER}: {data['commands']}"
         if step["status"] == StepStatus.FIXED_FROM_MEMORY and step["fix_source"] == FixSource.SEMANTIC_MEMORY:
             adapted.append(hit["step_id"])
-    assert adapted, f"no adapted {SOURCE_MANAGER} fix is what finally fixed a step: {[h['step_id'] for h in hits]}"
+    assert adapted, f"no {SOURCE_MANAGER} install adapted to {TARGET_MANAGER} finally fixed a step: {[h['step_id'] for h in hits]}"
