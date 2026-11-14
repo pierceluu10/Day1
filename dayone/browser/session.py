@@ -216,15 +216,15 @@ class PlaywrightSession:
     def open_welcome(self, step_id: str) -> None:
         """Navigate like a person: search the repo's issues for the hire's Welcome issue and click it."""
         title = WELCOME_ISSUE_TITLE.format(hire=self.hire.name)
-        if self._page is not None and self.page.title().startswith(title):
+        # Gitea titles the page "#4 - Welcome to Acme, ada! - acme-api - ...", so the title only contains it.
+        if self._page is not None and title in self.page.title():
             return
         self.goto(f"/{REPO}/issues?q={quote(title)}")
         self.act(ISSUES_OPEN_WELCOME, Action.CLICK, step_id=step_id)
         self.page.wait_for_load_state()
 
     def tick_item(self, item: str, step_id: str) -> None:
-        if not self.page.title().startswith(WELCOME_ISSUE_TITLE.format(hire=self.hire.name)):
-            self.open_welcome(step_id)
+        self.open_welcome(step_id)
         # The issue's raw markdown is in the page; an already-ticked item fires no save to wait for.
         if is_ticked(self.page.locator(".raw-content").first.text_content() or "", item):
             return
