@@ -101,7 +101,6 @@ function renderHires(hires) {
     if (summary.hire === view.hire) link.setAttribute("aria-current", "page");
     return link;
   }));
-  $("empty").hidden = hires.length > 0 || view.hire !== null;
 }
 
 function stepRow(stepId) {
@@ -426,7 +425,7 @@ async function boot() {
   $("hire-names").replaceChildren(...config.hires.map((name) => Object.assign(document.createElement("option"), { value: name })));
   const initial = location.hash.slice(1) || (await getJSON("/api/hires")).at(-1)?.hire;
   if (initial) watch(initial);
-  else $("empty").hidden = false;
+  else $("empty").textContent = "No runs in Atlas yet. Type a hire's name, pick their laptop and press Start.";
 }
 
 boot().catch(showError);
