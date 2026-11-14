@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import shutil
 from collections.abc import Iterator
 from contextlib import contextmanager
 
-from dayone.browser.session import PlaywrightSession
+from dayone.browser.session import PROFILE_DIR, PlaywrightSession
 from dayone.config import Settings
 from dayone.contracts import Hire
 from dayone.engine.runner import Parts, ResetParts
@@ -61,4 +62,13 @@ def reset_parts(settings: Settings, store: AtlasStore) -> ResetParts:
         finally:
             events.close()
 
-    return ResetParts(reset_gitea=GiteaClient(settings).reset_hire, remove_container=remove_container)
+    def remove_browser_profile(name: str) -> None:
+        profile = PROFILE_DIR / name
+        if profile.exists():
+            shutil.rmtree(profile)
+
+    return ResetParts(
+        reset_gitea=GiteaClient(settings).reset_hire,
+        remove_container=remove_container,
+        remove_browser_profile=remove_browser_profile,
+    )

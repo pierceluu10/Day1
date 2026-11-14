@@ -106,6 +106,7 @@ OpenParts = Callable[[Hire], AbstractContextManager[Parts]]
 class ResetParts:
     reset_gitea: Callable[[str], None]  # delete the hire's SSH keys, untick their Welcome issue
     remove_container: Callable[[Hire], None]
+    remove_browser_profile: Callable[[str], None]  # the saved sign-in would otherwise pass b_sign_in unrun
 
 
 class Lease:
@@ -177,7 +178,8 @@ def reset(name: str | None) -> None:
 
 
 def reset_hires(store: AtlasStore, name: str | None, parts: ResetParts) -> list[str]:
-    """Gitea keys and Welcome ticks, container, then the Atlas ledger, so the next run's checks fail before they pass.
+    """Gitea keys and Welcome ticks, browser profile, container, then the Atlas ledger,
+    so the next run's checks fail before they pass.
 
     Every lease is taken before anything is touched: a hire that is being run makes the whole reset refuse.
     """
@@ -192,6 +194,7 @@ def reset_hires(store: AtlasStore, name: str | None, parts: ResetParts) -> list[
         taken.append(hire_name)
     for hire_name in names:
         parts.reset_gitea(hire_name)
+        parts.remove_browser_profile(hire_name)
         hire = store.get_hire(hire_name)
         if hire is not None:  # no hire doc means the engine never created a container for it
             parts.remove_container(hire)

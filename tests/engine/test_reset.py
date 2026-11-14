@@ -14,10 +14,13 @@ class Recorder:
     def __init__(self) -> None:
         self.gitea: list[str] = []
         self.containers: list[str] = []
+        self.profiles: list[str] = []
 
     def parts(self) -> ResetParts:
         return ResetParts(
-            reset_gitea=self.gitea.append, remove_container=lambda hire: self.containers.append(hire.container)
+            reset_gitea=self.gitea.append,
+            remove_container=lambda hire: self.containers.append(hire.container),
+            remove_browser_profile=self.profiles.append,
         )
 
 
@@ -45,7 +48,7 @@ def test_reset_one_hire_clears_gitea_container_and_ledger(store: AtlasStore) -> 
     _seed(store, "grace")
     recorder = Recorder()
     assert reset_hires(store, "ada", recorder.parts()) == ["ada"]
-    assert recorder.gitea == ["ada"] and recorder.containers == ["dayone-ada"]
+    assert recorder.gitea == ["ada"] and recorder.containers == ["dayone-ada"] and recorder.profiles == ["ada"]
     assert _left(store, "ada") == (0, 0, 0)
     assert _left(store, "grace") == (1, 1, 1), "other hires untouched"
     assert store.db["experiences"].count_documents({}) == 2, "experiences are memory and survive reset"
@@ -63,7 +66,7 @@ def test_reset_all_covers_every_hire_in_atlas(store: AtlasStore) -> None:
 def test_hire_without_atlas_doc_still_gets_gitea_reset(store: AtlasStore) -> None:
     recorder = Recorder()
     reset_hires(store, "linus", recorder.parts())
-    assert recorder.gitea == ["linus"] and recorder.containers == []
+    assert recorder.gitea == ["linus"] and recorder.profiles == ["linus"] and recorder.containers == []
     assert _left(store, "linus") == (0, 0, 0)
 
 
@@ -74,6 +77,6 @@ def test_reset_refuses_while_any_hire_is_running_and_touches_nothing(store: Atla
     with Lease(store, "barbara"):
         with pytest.raises(LeaseHeld):
             reset_hires(store, None, recorder.parts())
-    assert recorder.gitea == [] and recorder.containers == []
+    assert recorder.gitea == [] and recorder.containers == [] and recorder.profiles == []
     assert _left(store, "ada") == (1, 1, 1)
     assert store.acquire_lease("ada", "next-runner", 1.0), "reset released the leases it took"
