@@ -39,7 +39,8 @@ VENV_PYTHON = f"{VENV_DIR}/bin/python"
 KEY_PATH = "/root/.ssh/id_ed25519"
 CLONE_URL = f"git@{GITEA_HOSTNAME}:{REPO}.git"
 WHEEL_DIR = "/tmp/dayone-wheels"
-JUNIT_PATH = "/tmp/dayone-junit.xml"
+REPORT_DIR = "/root/.dayone"
+REPORT_MARKER = "@@dayone-junit"
 
 BASE_TOOLS = {
     "apt": "apt-get update && apt-get install -y --no-install-recommends "
@@ -240,22 +241,43 @@ def check_init_db(ctx: StepContext) -> CheckResult:
 # --- t_run_tests ---------------------------------------------------------------------
 
 
+# A test run counts only for the commit it ran on, so the drift re-verify after the remote moves re-runs the suite.
+RUN_TESTS = (
+    f"head=$(git -C {REPO_DIR} rev-parse HEAD) && mkdir -p {REPORT_DIR} && "
+    f"{{ {VENV_PYTHON} -m pytest -q -p no:cacheprovider --junitxml={REPORT_DIR}/tests-$head.xml; status=$?; "
+    f"echo $status > {REPORT_DIR}/tests-$head.exit; exit $status; }}"
+)
+
+
 def check_run_tests(ctx: StepContext) -> CheckResult:
-    command = f"rm -f {JUNIT_PATH}; {VENV_PYTHON} -m pytest -q -p no:cacheprovider --junitxml={JUNIT_PATH}"
-    result = _exec(ctx, command, TEST_TIMEOUT_S, REPO_DIR)
-    report = _exec(ctx, f"cat {JUNIT_PATH}")
-    if not report.ok:
-        return _failed(f"pytest wrote no report, exit {result.exit_code}", result, REPO_DIR)
-    suite = ElementTree.fromstring(report.output)
+    head_result = _exec(ctx, f"git -C {REPO_DIR} rev-parse HEAD")
+    if not head_result.ok:
+        return _failed("no clone to test", head_result)
+    head = head_result.output.strip()
+    report_path = f"{REPORT_DIR}/tests-{head}"
+    result = _exec(ctx, f"cat {report_path}.exit && echo {REPORT_MARKER} && cat {report_path}.xml")
+    if not result.ok:
+        message = f"no test run recorded for HEAD {head}: run the suite with {VENV_PYTHON} -m pytest in {REPO_DIR}"
+        return _failed(f"tests not run at {head[:SHORT_SHA]}", result, message=message, head=head)
+    exit_text, _, xml = result.output.partition(REPORT_MARKER)
+    exit_code = int(exit_text.strip())
+    suite = ElementTree.fromstring(xml.strip())
     suite = suite if suite.tag == "testsuite" else suite.find("testsuite")
     collected = int(suite.get("tests", 0))
     unsuccessful = sum(int(suite.get(field, 0)) for field in ("failures", "errors", "skipped"))
     passed = collected - unsuccessful
-    detail = {"collected": collected, "passed": passed, "exit_code": result.exit_code}
-    evidence = f"{passed} passed of {collected}, exit {result.exit_code}"
-    if result.exit_code != 0 or collected == 0 or passed != collected:
-        return _failed(evidence, result, REPO_DIR, **detail)
-    return CheckResult(True, f"{passed} passed, exit 0", detail)
+    detail = {"collected": collected, "passed": passed, "exit_code": exit_code, "head": head}
+    evidence = f"{passed} passed of {collected}, exit {exit_code} at {head[:SHORT_SHA]}"
+    if exit_code != 0 or collected == 0 or passed != collected:
+        failures = [
+            f"{case.get('classname')}.{case.get('name')}: {problem.get('message', '').strip()}"
+            for case in suite.iter("testcase")
+            for problem in case
+            if problem.tag in ("failure", "error")
+        ]
+        command = f"$ cd {REPO_DIR} && {VENV_PYTHON} -m pytest -q  # report {report_path}.xml"
+        return CheckResult(False, evidence, detail, "\n".join([command, *failures]))
+    return CheckResult(True, evidence, detail)
 
 
 def _step(step_id: str, title: str, check: Callable[[StepContext], CheckResult], run: Callable[[StepContext], RunResult]) -> Step:
@@ -287,7 +309,7 @@ TERMINAL_STEPS: dict[str, Step] = {
             "t_run_tests",
             "Run the test suite",
             check_run_tests,
-            _shell_run(f"{VENV_PYTHON} -m pytest -q", TEST_TIMEOUT_S, REPO_DIR),
+            _shell_run(RUN_TESTS, TEST_TIMEOUT_S, REPO_DIR),
         ),
     )
 }
