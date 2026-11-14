@@ -1,4 +1,4 @@
-"""Live fixtures: the real Gitea (hire linus), a real ubuntu container, real Claude; memory and events are in-test fakes."""
+"""Live fixtures: the real Gitea (dev user dev4, seeded like a hire), a real ubuntu container, real Claude; memory and events are in-test fakes."""
 
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ from dayone.config import STATE_DIR, settings
 from dayone.contracts import (
     DOCKER_NETWORK,
     MACHINE_IMAGES,
+    REPO_DIR,
     ExecResult,
     Hire,
     LocatorHint,
@@ -25,8 +26,9 @@ from dayone.contracts import (
     idempotency_key,
 )
 from dayone.gitea import GiteaClient
+from scripts.seed import ensure_hire, ensure_team
 
-HIRE = "linus"
+HIRE = "dev4"  # session 4's own Gitea user and container; the five demo hires are never touched
 SCREENSHOT_DIR = STATE_DIR / "screenshots"
 CONTAINER_SETUP = (
     "apt-get update -qq && apt-get install -y -qq openssh-client git >/dev/null"
@@ -120,19 +122,19 @@ def container() -> str:
     return name
 
 
+@pytest.fixture(scope="session")
+def dev_hire(gitea) -> str:
+    """A Gitea user seeded exactly like a hire (team member, assigned Welcome issue) but never used by the demo."""
+    ensure_hire(gitea, ensure_team(gitea), HIRE, settings().gitea_hire_password)
+    return HIRE
+
+
 @pytest.fixture
-def clean_linus(gitea, container):
-    """linus with no keys, an unticked Welcome issue, no browser profile, and an empty clone dir."""
-    for key in gitea.user_keys(HIRE):
-        gitea.request("DELETE", f"/admin/users/{HIRE}/keys/{key['id']}")
-    issue = gitea.welcome_issue(HIRE)
-    gitea.request("PATCH", f"/repos/acme/acme-api/issues/{issue['number']}",
-                  json={"body": issue["body"].replace("- [x] ", "- [ ] ")})
-    for thread in gitea.request("GET", "/notifications", params={"all": "true", "sudo": HIRE, "limit": 50}):
-        if thread["subject"]["html_url"].endswith(f"/issues/{issue['number']}") and not thread["unread"]:
-            gitea.request("PATCH", f"/notifications/threads/{thread['id']}", params={"to-status": "unread", "sudo": HIRE})
-    shutil.rmtree(PROFILE_DIR / HIRE, ignore_errors=True)
-    DockerExec(container).exec("rm -rf /root/acme-api ~/.ssh/known_hosts", 30)
+def clean_hire(dev_hire, gitea, container):
+    """The dev hire with no keys, an unticked unread Welcome issue, no browser profile, and no clone."""
+    gitea.reset_hire(dev_hire)
+    shutil.rmtree(PROFILE_DIR / dev_hire, ignore_errors=True)
+    DockerExec(container).exec(f"rm -rf {REPO_DIR} ~/.ssh/known_hosts", 30)
 
 
 @pytest.fixture

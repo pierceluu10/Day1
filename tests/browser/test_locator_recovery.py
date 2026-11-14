@@ -1,7 +1,7 @@
 """Locator memory recovers from a stale saved locator, end to end on the real stack.
 
 Real Atlas (dev DB), real ExperienceMemory with Voyage embeddings, real AnthropicLLM, real AtlasEventBus.
-A deliberately stale locator for the add-key button is saved as if hire `ada` had learned it; linus's
+A deliberately stale locator for the add-key button is saved as if hire `ada` had learned it; the dev hire's
 b_add_ssh_key must show red, reason (amber), save the new locator, and the next run must use it (green)
 with no LLM call.
 """
@@ -80,7 +80,7 @@ def locator_events(db, run_id: str) -> list[dict]:
     return [event["data"] for event in db["events"].find(query).sort([("ts", 1), ("seq", 1)])]
 
 
-def test_stale_saved_locator_is_reasoned_saved_and_reused(clean_linus, db, memory, gitea, container, screenshots):
+def test_stale_saved_locator_is_reasoned_saved_and_reused(clean_hire, db, memory, gitea, container, screenshots):
     db[EXPERIENCES].delete_many({"kind": StepKind.BROWSER, "goal": KEYS_OPEN_FORM})
     memory.save_locator(LocatorHint(KEYS_OPEN_FORM, STALE_LOCATOR, STALE_BBOX, KEYS_PAGE_SUMMARY, STALE_SOURCE, None), STALE_SOURCE)
     llm = CountingLLM(settings())
