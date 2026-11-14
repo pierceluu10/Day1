@@ -197,7 +197,7 @@ class FixProposal:
     experience_id: str | None = None
     similarity: float | None = None  # vectorSearchScore, shown on screen
     source_hire: str | None = None  # whose experience this came from
-    adapted_from: str | None = None  # e.g. "apt" when commands were adapted to apk
+    adapted_from: str | None = None  # source machine summary, e.g. "ubuntu 22.04, apt", when adapted for another machine
 
 
 @dataclass(frozen=True)
