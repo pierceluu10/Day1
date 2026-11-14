@@ -43,10 +43,10 @@ def _browser(ctx: StepContext) -> PlaywrightSession:
 def sign_in_run(ctx: StepContext) -> RunResult:
     browser = _browser(ctx)
     browser.goto("/user/login")
-    browser.act(LOGIN_USERNAME, Action.FILL, ctx.hire.name, ctx.step_id)
-    browser.act(LOGIN_PASSWORD, Action.FILL, settings().gitea_hire_password, ctx.step_id)
-    browser.act(LOGIN_REMEMBER, Action.CHECK, step_id=ctx.step_id)  # long-lived cookie survives a restart
-    browser.act(LOGIN_SUBMIT, Action.CLICK, step_id=ctx.step_id)
+    browser.act(LOGIN_USERNAME, Action.FILL, ctx.step_id, ctx.hire.name)
+    browser.act(LOGIN_PASSWORD, Action.FILL, ctx.step_id, settings().gitea_hire_password)
+    browser.act(LOGIN_REMEMBER, Action.CHECK, ctx.step_id)  # long-lived cookie survives a restart
+    browser.act(LOGIN_SUBMIT, Action.CLICK, ctx.step_id)
     browser.page.wait_for_load_state()
     return RunResult(ok=True, output=f"submitted sign-in form, now at {browser.page.url}")
 
@@ -83,10 +83,10 @@ def add_ssh_key_run(ctx: StepContext) -> RunResult:
     public_key = _public_key(ctx)
     browser = _browser(ctx)
     browser.goto("/user/settings/keys")
-    browser.act(KEYS_OPEN_FORM, Action.CLICK, step_id=ctx.step_id)
-    browser.act(KEYS_TITLE, Action.FILL, ctx.idempotency_key, ctx.step_id)
-    browser.act(KEYS_CONTENT, Action.FILL, public_key, ctx.step_id)
-    browser.act(KEYS_SUBMIT, Action.CLICK, step_id=ctx.step_id)
+    browser.act(KEYS_OPEN_FORM, Action.CLICK, ctx.step_id)
+    browser.act(KEYS_TITLE, Action.FILL, ctx.step_id, ctx.idempotency_key)
+    browser.act(KEYS_CONTENT, Action.FILL, ctx.step_id, public_key)
+    browser.act(KEYS_SUBMIT, Action.CLICK, ctx.step_id)
     browser.page.wait_for_load_state()
     return RunResult(ok=True, output=f"submitted key {ctx.idempotency_key}")
 

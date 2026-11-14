@@ -4,6 +4,7 @@ Each snag step must fail its check after the naive run() with recognisable error
 fix memory would learn is applied by hand. Error texts are written to tests/terminal/errors/ for inspection.
 """
 
+import re
 from pathlib import Path
 
 import pytest
@@ -13,7 +14,6 @@ from dayone.steps.terminal_steps import TERMINAL_STEPS
 from dayone.terminal.ssh import ssh_auth_ok
 from dayone.terminal.fingerprint import fingerprint
 
-DEV_HIRE = "grace"
 
 ERRORS_DIR = Path(__file__).parent / "errors"
 FIX_TIMEOUT_S = 900.0
@@ -53,21 +53,17 @@ def _show(machine: Machine, step_id: str, label: str, result: CheckResult) -> No
         print(f"--- error_text (fingerprint {fingerprint(result.error_text)}) ---\n{result.error_text}\n---")
 
 
-def _add_dev_key(gitea, public_key: str, fingerprint_: str) -> None:
-    if any(key["fingerprint"] == fingerprint_ for key in gitea.user_keys(DEV_HIRE)):
+def _add_dev_key(gitea, dev_hire: str, public_key: str, fingerprint_: str) -> None:
+    if any(key["fingerprint"] == fingerprint_ for key in gitea.user_keys(dev_hire)):
         return
-    for key in gitea.user_keys(DEV_HIRE):
+    for key in gitea.user_keys(dev_hire):
         if key["title"] == DEV_KEY_TITLE:
-            gitea.request("DELETE", f"/admin/users/{DEV_HIRE}/keys/{key['id']}")
-    gitea.request("POST", f"/admin/users/{DEV_HIRE}/keys", json={"title": DEV_KEY_TITLE, "key": public_key})
-
-
-# Reconciling: the test check re-runs the suite, so it legitimately passes before run() once setup is done.
-PASSES_BEFORE_RUN = {"t_run_tests"}
+            gitea.request("DELETE", f"/admin/users/{dev_hire}/keys/{key['id']}")
+    gitea.request("POST", f"/admin/users/{dev_hire}/keys", json={"title": DEV_KEY_TITLE, "key": public_key})
 
 
 @pytest.mark.parametrize("machine", [Machine.UBUNTU, Machine.ALPINE, Machine.DEBIAN])
-def test_fresh_machine_reaches_passing_tests(machine: Machine, gitea, make_executor, make_context) -> None:
+def test_fresh_machine_reaches_passing_tests(machine: Machine, gitea, dev_hire, make_executor, make_context) -> None:
     executor = make_executor(machine)
     executor.remove_container()
     executor.ensure_container()
@@ -79,8 +75,7 @@ def test_fresh_machine_reaches_passing_tests(machine: Machine, gitea, make_execu
 
         before = step.check(ctx)
         _show(machine, step_id, "check before run", before)
-        if step_id not in PASSES_BEFORE_RUN:
-            assert not before.ok, f"{step_id} passed before anything ran: the check proves nothing"
+        assert not before.ok, f"{step_id} passed before anything ran: the check proves nothing"
 
         run = step.run(ctx)
         assert run.ok, f"{step_id} naive run failed:\n{run.output[-3000:]}"
@@ -104,14 +99,23 @@ def test_fresh_machine_reaches_passing_tests(machine: Machine, gitea, make_execu
         if step_id == "t_ssh_keygen":
             denied = ssh_auth_ok(ctx)
             _show(machine, step_id, "ssh -T before key is registered", denied)
-            _add_dev_key(gitea, after.detail["public_key"], after.detail["fingerprint"])
+            _add_dev_key(gitea, dev_hire, after.detail["public_key"], after.detail["fingerprint"])
             authed = ssh_auth_ok(ctx)
             _show(machine, step_id, "ssh -T after key is registered", authed)
             assert authed.ok and not denied.ok
 
-    assert TERMINAL_STEPS["t_run_tests"].check(make_context(executor, gitea, "t_run_tests")).evidence.endswith(
-        "passed, exit 0"
-    )
+    tests = TERMINAL_STEPS["t_run_tests"]
+    tests_ctx = make_context(executor, gitea, "t_run_tests")
+    head = executor.exec(f"git -C {REPO_DIR} rev-parse HEAD", FIX_TIMEOUT_S).output.strip()
+    assert re.fullmatch(rf"(\d+) passed of \1, exit 0 at {head[:7]}", tests.check(tests_ctx).evidence)
+    # A new commit invalidates the recorded run: the check fails until the suite runs on that commit.
+    moved = executor.exec("git -c user.name=t -c user.email=t@t commit -q --allow-empty -m drift", FIX_TIMEOUT_S, REPO_DIR)
+    assert moved.ok, moved.output
+    stale = tests.check(tests_ctx)
+    _show(machine, "t_run_tests", "check after local HEAD moved", stale)
+    assert not stale.ok and "no test run recorded for HEAD" in stale.error_text
+    assert tests.run(tests_ctx).ok and tests.check(tests_ctx).ok
+    assert executor.exec("git reset -q --hard HEAD~1", FIX_TIMEOUT_S, REPO_DIR).ok
     # Re-running clone on an existing, current checkout fast-forwards instead of failing on the directory.
     clone_ctx = make_context(executor, gitea, "t_clone")
     assert TERMINAL_STEPS["t_clone"].run(clone_ctx).ok

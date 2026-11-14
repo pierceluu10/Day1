@@ -187,7 +187,17 @@ h2 { font-size: 1.375rem; font-weight: 700; letter-spacing: -0.01em; }
   color: var(--muted);
   overflow-wrap: anywhere;
 }
-.step-note { grid-column: 1 / -1; font-size: 0.875rem; font-weight: 600; }
+.step-note {
+  grid-column: 1 / -1;
+  font-size: 0.875rem;
+  font-weight: 600;
+  /* Reasoned fixes can be long command chains; two lines is enough to read from the back of the room. */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
 
 .step[data-status="not_started"] .step-title { color: var(--muted); }
 .step[data-status="not_started"] .step-status { color: var(--muted); font-weight: 400; }

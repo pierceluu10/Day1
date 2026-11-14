@@ -1,7 +1,7 @@
 """Every number and status the page shows, as Atlas queries. QA's acceptance test 7 reuses these.
 
 Reads only the shapes in `dayone.contracts`: `events` documents are `Event` fields, `steps` documents
-are `StepRecord` fields plus `llm_calls`, `hires` documents are `Hire` fields. The definitions match
+are `StepRecord` fields plus `llm_calls`, `hires` documents are `Hire` fields keyed by `_id` = name (the engine's store). The definitions match
 session 7's `tests/acceptance/atlas.py` (see the shared qa-atlas-fields note).
 """
 
@@ -78,7 +78,7 @@ def run_summary(db: Database, hire: str, run_id: str | None = None) -> dict[str,
         ),
         {"fixes_from_memory": 0, "llm_calls": 0},
     )
-    hire_doc = db[HIRES].find_one({"name": hire}, {"machine": 1}) or {}
+    hire_doc = db[HIRES].find_one({"_id": hire}, {"machine": 1}) or {}
     return {
         "hire": hire,
         "machine": hire_doc.get("machine"),

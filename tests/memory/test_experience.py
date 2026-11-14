@@ -20,7 +20,9 @@ from dayone.contracts import (
     StepKind,
 )
 from dayone.memory.experience import (
+    FIX_OUTPUT,
     MAX_REASONING_ATTEMPTS,
+    MAX_REJECTED_REPLIES,
     REASON_SYSTEM,
     SEMANTIC_MIN_SIMILARITY,
     ExperienceMemory,
@@ -34,6 +36,7 @@ from .conftest import wait_until_searchable
 STEP = "t_system_package"
 UBUNTU = MachineFacts("ubuntu", "22.04", "apt", {"python": "3.12.7", "pip": "24.2"})
 DEBIAN = MachineFacts("debian", "12", "apt", {"python": "3.12.7", "pip": "24.2"})
+ADA_MACHINE = "ubuntu 22.04, apt"
 ALPINE = MachineFacts("alpine", "3.20", "apk", {"python": "3.12.8", "pip": "24.0"})
 
 UBUNTU_PG_CONFIG = """Collecting psycopg2==2.9.9 (from -r requirements.txt (line 4))
@@ -182,7 +185,7 @@ def test_ubuntu_apt_fix_is_found_semantically_and_adapted_to_apk_on_alpine(harne
     proposal = resolution.proposal
     print(f"similarity {proposal.similarity:.3f}, from {proposal.source_hire}, commands {proposal.commands}")
     assert proposal.source == FixSource.SEMANTIC_MEMORY
-    assert proposal.adapted_from == "apt"
+    assert proposal.adapted_from == ADA_MACHINE
     assert proposal.source_hire == "ada"
     assert proposal.similarity >= SEMANTIC_MIN_SIMILARITY
     assert resolution.attempts == 1 and [call.commands for call in calls] == [proposal.commands]
@@ -192,11 +195,38 @@ def test_ubuntu_apt_fix_is_found_semantically_and_adapted_to_apk_on_alpine(harne
     assert "apt" in llm.prompts[-1] and "apk" in llm.prompts[-1]
 
     adapted = experiences.find_one({"_id": ObjectId(proposal.experience_id)})
-    assert adapted["context"]["package_manager"] == "apk" and adapted["adapted_from"] == "apt"
+    assert adapted["context"]["package_manager"] == "apk" and adapted["adapted_from"] == ADA_MACHINE
     assert adapted["fix_commands"] == list(proposal.commands) and adapted["hire"] == "ken"
     hit = events.of(EventType.MEMORY_HIT)[-1]
-    assert hit["similarity"] == proposal.similarity and hit["adapted_from"] == "apt"
+    assert hit["similarity"] == proposal.similarity and hit["adapted_from"] == ADA_MACHINE
     assert not events.of(EventType.REASONING_STARTED)[1:], "only ada's first resolve may reason"
+
+
+def test_ubuntu_hit_is_adapted_for_debian_although_both_use_apt(harness):
+    memory, llm, _, _, experiences = harness
+    ada = save_ada_ubuntu_fix(memory, [])
+    ppa = ["add-apt-repository -y ppa:deadsnakes/ppa", "DEBIAN_FRONTEND=noninteractive apt-get install -y libpq-dev"]
+    experiences.update_one({"_id": ObjectId(ada.proposal.experience_id)}, {"$set": {"fix_commands": ppa}})
+    wait_until_searchable(experiences, 1)
+
+    calls: list[FixProposal] = []
+
+    def debian_check(proposal: FixProposal) -> CheckResult:
+        calls.append(proposal)
+        if runs("add-apt-repository|ppa:", proposal):
+            return CheckResult(ok=False, evidence="fix command failed", error_text="add-apt-repository: not found")
+        return apt_fix_passes([])(proposal)
+
+    prompts_before = len(llm.prompts)
+    # Same text as ada's error: even an identical fingerprint must not replay an ubuntu fix on debian.
+    resolution = memory.resolve(failure("grace", DEBIAN, UBUNTU_PG_CONFIG), debian_check)
+
+    print("adapted", resolution.proposal.commands if resolution.proposal else None)
+    assert resolution.fixed and resolution.attempts == 1, "the ubuntu-only PPA must not be replayed on debian"
+    assert resolution.proposal.source == FixSource.SEMANTIC_MEMORY
+    assert resolution.proposal.adapted_from == ADA_MACHINE and resolution.proposal.source_hire == "ada"
+    assert resolution.llm_calls == 1 == len(llm.prompts) - prompts_before
+    assert "debian 12" in llm.prompts[-1] and "ubuntu 22.04" in llm.prompts[-1]
 
 
 def test_reasoning_stops_after_three_attempts_and_feeds_back_each_new_error(harness):
@@ -212,10 +242,13 @@ def test_reasoning_stops_after_three_attempts_and_feeds_back_each_new_error(harn
 
     assert not resolution.fixed and resolution.proposal is None
     assert resolution.attempts == len(calls) == 3
-    assert resolution.llm_calls == len(llm.prompts) == 3
+    # A rejected reply is re-asked without costing a try, so calls may exceed tries by up to MAX_REJECTED_REPLIES.
+    assert resolution.llm_calls == len(llm.prompts)
+    assert MAX_REASONING_ATTEMPTS <= resolution.llm_calls <= MAX_REASONING_ATTEMPTS + MAX_REJECTED_REPLIES
     assert resolution.last_check.error_text == new_errors[2]
-    assert new_errors[0] in llm.prompts[1] and new_errors[1] in llm.prompts[2]
-    assert all(command in llm.prompts[1] for command in calls[0].commands), "prior commands are fed back"
+    assert not any(error in llm.prompts[0] for error in new_errors)
+    assert new_errors[0] in llm.prompts[-1] and new_errors[1] in llm.prompts[-1], "each new error is fed back"
+    assert all(command in llm.prompts[-1] for command in calls[0].commands), "prior commands are fed back"
     assert len(events.of(EventType.MEMORY_MISS)) == 1 and len(events.of(EventType.REASONING_STARTED)) == 1
     assert [attempt["ok"] for attempt in events.of(EventType.FIX_ATTEMPT)] == [False] * 3
     assert experiences.count_documents({"outcome": "failed"}) == 3
@@ -269,7 +302,7 @@ def test_saved_fix_is_the_reasoning_chain_without_a_failed_memory_proposal(harne
         return apt_fix(proposal)
 
     debian_error = UBUNTU_PG_CONFIG.replace("k2x9f1q3", "p0w8z7m2")
-    resolution = memory.resolve(failure("grace", DEBIAN, debian_error), check)
+    resolution = memory.resolve(failure("grace", UBUNTU, debian_error), check)
 
     assert resolution.fixed and calls[0].source == FixSource.SEMANTIC_MEMORY
     assert list(calls[0].commands) == wrong
@@ -312,6 +345,34 @@ def test_unparseable_reply_does_not_use_up_a_tried_attempt(harness, embedder):
     assert ".venv/bin/pip" in REASON_SYSTEM
 
 
+def test_saved_fix_keeps_only_commands_that_exited_zero(harness):
+    memory, _, _, _, experiences = harness
+    calls: list[FixProposal] = []
+
+    def engine_try_fix(proposal: FixProposal) -> CheckResult:
+        """Like runner._try_fix: stop at the first failing command; attempt 1's last fix command exits 2."""
+        calls.append(proposal)
+        fixes = [command for command in proposal.commands if not command.endswith("|| true")]
+        outputs = []
+        for command in proposal.commands:
+            failing = len(calls) == 1 and command == fixes[-1]
+            outputs.append({"command": command, "exit_code": 2 if failing else 0, "output": ""})
+            if failing:
+                return CheckResult(
+                    ok=False, evidence=f"fix command failed: {command}", detail={FIX_OUTPUT: outputs},
+                    error_text="make: *** No rule to make target 'migrate'.  Stop.",
+                )
+        return CheckResult(ok=True, evidence="schema present: users", detail={FIX_OUTPUT: outputs})
+
+    resolution = memory.resolve(failure("ada", UBUNTU, "sqlite3.OperationalError: no such table: users"), engine_try_fix)
+
+    assert resolution.fixed and resolution.attempts == 2
+    first, second = ([c for c in call.commands if not c.endswith("|| true")] for call in calls)
+    saved = experiences.find_one({"_id": ObjectId(resolution.proposal.experience_id)})
+    print("attempt 1", first, "attempt 2", second, "saved", saved["fix_commands"])
+    assert saved["fix_commands"] == first[:-1] + second, "the failed command must not be replayed by hire 2"
+
+
 def test_close_loop_opens_one_issue_per_repeated_fix_and_is_idempotent(harness):
     memory, _, events, gitea, experiences = harness
     save_ada_ubuntu_fix(memory, [])
@@ -319,10 +380,10 @@ def test_close_loop_opens_one_issue_per_repeated_fix_and_is_idempotent(harness):
 
     memory.resolve(failure("linus", UBUNTU, UBUNTU_PG_CONFIG), apt_fix_passes([]))
     wait_until_searchable(experiences, 1)
-    debian_error = UBUNTU_PG_CONFIG.replace("k2x9f1q3", "p0w8z7m2")  # new tmp dir: new fingerprint, same apt fix
-    debian = memory.resolve(failure("barbara", DEBIAN, debian_error), apt_fix_passes([]))
-    assert debian.proposal.source == FixSource.SEMANTIC_MEMORY and debian.proposal.adapted_from is None
-    assert debian.llm_calls == 0
+    other_tmp = UBUNTU_PG_CONFIG.replace("k2x9f1q3", "p0w8z7m2")  # new tmp dir: new fingerprint, same machine
+    barbara = memory.resolve(failure("barbara", UBUNTU, other_tmp), apt_fix_passes([]))
+    assert barbara.proposal.source == FixSource.SEMANTIC_MEMORY and barbara.proposal.adapted_from is None
+    assert barbara.llm_calls == 0
 
     first = memory.close_loop()
     second = memory.close_loop()
@@ -364,6 +425,8 @@ def test_guard_makes_model_commands_runnable_unattended():
         '```json\n{"inspect": ["grep -rn init ."], "commands": ["apt-get update"], "rationale": "refresh"}\n```'
     )
     assert inspect == ("grep -rn init . || true",), "a grep with no match must not abort the attempt"
+    inspect, _, _ = parse_fix('{"inspect": ["ls docs || true"], "commands": ["true"]}')
+    assert inspect == ("ls docs || true",)
     assert commands == ("apt-get update",) and rationale == "refresh"
     inspect, _, _ = parse_fix(r"""{"inspect": ["grep -rn 'init_db\|schema' ."], "commands": ["true"]}""")
     assert inspect == (r"grep -rn 'init_db\|schema' . || true",), "an undoubled backslash is kept literally"

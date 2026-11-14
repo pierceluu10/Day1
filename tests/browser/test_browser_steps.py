@@ -1,4 +1,4 @@
-"""Browser steps against the live Gitea as linus, headless. Each check must fail before its run and pass after."""
+"""Browser steps against the live Gitea as the dev hire, headless. Each check must fail before its run and pass after."""
 
 from __future__ import annotations
 
@@ -42,7 +42,7 @@ def sign_in(make_context, memory, events):
     return ctx
 
 
-def test_ssh_key_added_in_browser_lets_container_clone(clean_linus, make_context, gitea, screenshots):
+def test_ssh_key_added_in_browser_lets_container_clone(clean_hire, make_context, gitea, screenshots):
     memory, events = DictMemory(), RecordingEvents()
     signed_in = sign_in(make_context, memory, events)
     ctx = make_context("b_add_ssh_key", memory, events)
@@ -72,7 +72,7 @@ def test_ssh_key_added_in_browser_lets_container_clone(clean_linus, make_context
     assert any("memory" in path for path in shots)
 
 
-def test_sign_in_survives_browser_restart(clean_linus, make_context):
+def test_sign_in_survives_browser_restart(clean_hire, make_context):
     memory, events = DictMemory(), RecordingEvents()
     first = sign_in(make_context, memory, events)
     first.browser.close()  # same as the process dying: only the on-disk profile remains
@@ -82,7 +82,7 @@ def test_sign_in_survives_browser_restart(clean_linus, make_context):
     assert check.ok, "a resumed run would sign in again: the session did not persist"
 
 
-def test_moved_element_is_recovered_by_reasoning_and_saved(clean_linus, make_context, screenshots):
+def test_moved_element_is_recovered_by_reasoning_and_saved(clean_hire, make_context, screenshots):
     memory, events = DictMemory(), RecordingEvents()
     llm = ClaudeLLM()
     signed_in = sign_in(make_context, memory, events)
@@ -122,13 +122,13 @@ def test_moved_element_is_recovered_by_reasoning_and_saved(clean_linus, make_con
         (LOGIN_SUBMIT, Action.CLICK, "#no-such-button"),
     ],
 )
-def test_remembered_locator_unfit_for_action_is_treated_as_moved(clean_linus, make_context, goal, action, wrong):
+def test_remembered_locator_unfit_for_action_is_treated_as_moved(clean_hire, make_context, goal, action, wrong):
     memory, events = DictMemory(), RecordingEvents()
     memory.hints[goal] = LocatorHint(goal, wrong, (507.0, 147.0, 426.0, 38.0), "Sign In", "ada", None)
     browser = make_context("b_sign_in", memory, events).browser
     browser.goto("/user/login")
 
-    target = browser.act(goal, action, "secret" if action is Action.FILL else "", step_id="b_sign_in")
+    target = browser.act(goal, action, "b_sign_in", "secret" if action is Action.FILL else "")
 
     modes = [(d["mode"], d["locator"]) for t, _, d in events.events if t == "locator"]
     print(modes)
@@ -140,7 +140,7 @@ def test_remembered_locator_unfit_for_action_is_treated_as_moved(clean_linus, ma
     assert memory.hints[goal].locator == SEED_LOCATORS[goal] and memory.hints[goal].source_hire == HIRE
 
 
-def test_welcome_issue_and_checklist(clean_linus, make_context, gitea):
+def test_welcome_issue_and_checklist(clean_hire, make_context, gitea):
     memory, events = DictMemory(), RecordingEvents()
     signed_in = sign_in(make_context, memory, events)
     ctx = make_context("b_open_welcome", memory, events)
@@ -169,6 +169,13 @@ def test_welcome_issue_and_checklist(clean_linus, make_context, gitea):
     assert after.ok, after
     assert events.modes(checklist_goal(first))[0] == "memory"
     assert memory.hints[checklist_goal(first)].source_hire in {HIRE, SEED_SOURCE}
+
+    # The page attaches each LOCATOR event to a step: none may be anonymous, and a tick belongs to its item's step.
+    locator_steps = {d["goal"]: step for t, step, d in events.events if t == "locator"}
+    print(locator_steps)
+    assert None not in locator_steps.values()
+    assert locator_steps[checklist_goal(first)] == "b_add_ssh_key"
+    assert locator_steps[checklist_goal(WELCOME_CHECKLIST["t_run_tests"])] == "b_checklist"
 
     # After a restart (blank tab) the open is still proven: the read state lives in Gitea, not the page.
     ctx.browser.close()

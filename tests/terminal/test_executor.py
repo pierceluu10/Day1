@@ -4,7 +4,7 @@ import pytest
 
 from dayone.contracts import EventType, Machine
 
-UNIT_CONTAINER = "dayone-grace-unit"  # separate from grace's laptop so unit tests never disturb a live run
+UNIT_CONTAINER = "dayone-dev3-unit"  # separate from the live-test laptop so the two never disturb each other
 COMMAND_TIMEOUT_S = 10.0
 
 

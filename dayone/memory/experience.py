@@ -62,6 +62,7 @@ APT_INSTALL = re.compile(r"^(apt-get|apt)\s+install\b")
 ASSUME_YES = re.compile(r"\s(-y|--yes|--assume-yes)\b")
 SUDO = "sudo "
 APT_NONINTERACTIVE = "DEBIAN_FRONTEND=noninteractive "
+NON_ABORTING = "|| true"
 
 FIX_RULES = f"""Commands run as root with `sh -lc` in the new hire's throwaway container, in {REPO_DIR} when it exists.
 Use the machine's own package manager. Non-interactive only (-y, --no-cache), no sudo, one command per string,
@@ -78,7 +79,7 @@ in `commands`, and `commands` must hold only the fix, never inspection.
 {FIX_RULES}
 {STRICT_JSON}{{"inspect": ["..."], "commands": ["..."], "rationale": "one sentence"}}"""
 ADAPT_SYSTEM = (
-    "You adapt a setup fix that worked on one machine to a different machine (for example apt to apk), "
+    "You adapt a setup fix that worked on one machine to a different machine (for example apt to apk, or Ubuntu to Debian), "
     f"keeping its intent and translating package names.\n{FIX_RULES}\n"
     f'{STRICT_JSON}{{"commands": ["..."], "rationale": "one sentence"}}'
 )
@@ -130,6 +131,11 @@ def _facts_from(context: dict[str, Any]) -> MachineFacts:
     )
 
 
+def _machine(facts: MachineFacts) -> str:
+    """What a fix depends on: "ubuntu 22.04, apt". Tool versions are left out, the fix usually changes them."""
+    return f"{facts.os_family} {facts.os_version}, {facts.package_manager}"
+
+
 def _proposal_data(proposal: FixProposal) -> dict[str, Any]:
     return {**asdict(proposal), "commands": list(proposal.commands)}
 
@@ -178,8 +184,21 @@ def parse_fix(reply: str) -> tuple[tuple[str, ...], tuple[str, ...], str]:
     if not commands:
         raise LLMResponseError("no runnable commands in the reply")
     # try_fix stops at the first failing command, and a grep with no match exits 1: inspection must never abort the fix.
-    inspect = tuple(f"{command} || true" for command in guard_commands(_strings(body, "inspect")))
+    inspect = tuple(
+        command if command.endswith(NON_ABORTING) else f"{command} {NON_ABORTING}"
+        for command in guard_commands(_strings(body, "inspect"))
+    )
     return inspect, commands, str(body.get("rationale", ""))
+
+
+def succeeded(commands: tuple[str, ...], check: CheckResult) -> list[str]:
+    """The fix commands that exited 0, per the engine's `detail[FIX_OUTPUT]`."""
+    results = check.detail.get(FIX_OUTPUT)
+    if results is None:
+        # shortcut: a try_fix without FIX_OUTPUT gives no exit codes, so keep every command; all engines send it now.
+        return list(commands)
+    exited_ok = {result["command"] for result in results if result["exit_code"] == 0}
+    return [command for command in commands if command in exited_ok]
 
 
 def command_feedback(check: CheckResult) -> str:
@@ -283,6 +302,9 @@ class ExperienceMemory:
                 "fingerprint": failure.fingerprint,
                 "outcome": VERIFIED,
                 "kind": failure.kind,
+                # Same machine only: ubuntu's deadsnakes PPA fix fails on debian although both use apt.
+                "context.os_family": failure.facts.os_family,
+                "context.os_version": failure.facts.os_version,
                 "context.package_manager": failure.facts.package_manager,
             },
             sort=[("uses", DESCENDING)],
@@ -320,20 +342,21 @@ class ExperienceMemory:
             source_hire=hit["hire"],
         )
         original = _facts_from(hit["context"])
-        if original.package_manager == failure.facts.package_manager:
+        if _machine(original) == _machine(failure.facts):
             return base
         prompt = (
             f"This fix was verified on {original.summary()} for this error:\n{_tail(hit['error_text'])}\n\n"
             "Commands that fixed it there:\n" + "\n".join(hit["fix_commands"]) + "\n\n"
             f"Now machine {failure.facts.summary()} fails step {failure.step_id} with:\n{_tail(failure.error_text)}\n\n"
-            f"Rewrite the commands for {failure.facts.os_family} using {failure.facts.package_manager}."
+            f"Rewrite the commands for {_machine(failure.facts)}; anything specific to {original.os_family} "
+            "(its repositories, PPAs, package names) must become this machine's equivalent."
         )
         progress.llm_calls += 1
         try:
             _, commands, rationale = parse_fix(self._llm.complete(ADAPT_SYSTEM, prompt, MAX_TOKENS))
         except LLMResponseError:
             return None
-        return replace(base, commands=commands, rationale=rationale, adapted_from=original.package_manager)
+        return replace(base, commands=commands, rationale=rationale, adapted_from=_machine(original))
 
     def _reason(
         self,
@@ -349,7 +372,8 @@ class ExperienceMemory:
             for hint in hints
         )
         history: list[str] = []
-        # The saved fix is this chain only: a memory proposal that already failed is not part of what fixed it.
+        # The saved fix is this chain only: a memory proposal that already failed is not part of what fixed it, and a
+        # command that failed or never ran would abort the next hire's replay (try_fix stops at the first failure).
         chain: list[str] = []
         error = failure.error_text
         tried = rejected = 0
@@ -371,8 +395,9 @@ class ExperienceMemory:
                 continue
             tried += 1
             proposal = FixProposal(commands=inspect + commands, source=FixSource.REASONING, rationale=rationale)
-            chain.extend(commands)
-            if self._try(failure, proposal, try_fix, progress):
+            passed = self._try(failure, proposal, try_fix, progress)
+            chain.extend(succeeded(commands, progress.last_check))
+            if passed:
                 saved = self._save(failure, tuple(chain), progress, proposal)
                 return progress.resolution(replace(proposal, experience_id=str(saved)))
             check = progress.last_check
