@@ -137,6 +137,7 @@ function updateRow(row, highlight) {
   const showNote = note && !(DONE_STATUSES.has(doc.status) && TRANSIENT_NOTES.has(note.kind));
   noteLine.hidden = !showNote;
   noteLine.textContent = showNote ? note.text : "";
+  noteLine.title = noteLine.textContent; // the clamped note in full on hover
   if (showNote) noteLine.dataset.kind = note.kind;
 }
 
@@ -157,7 +158,8 @@ function renderRunHead() {
   if (summary === undefined) {
     [text, kind] = ["reading Atlas…", "idle"];
   } else if (!summary) {
-    [text, kind] = ["no run yet", "idle"];
+    // The engine process is up but has not written RUN_STARTED yet (container and memory setup).
+    [text, kind] = view.running ? ["starting", "running"] : ["no run yet", "idle"];
   } else if (summary.finished_at) {
     const outcome = summary.ok ? "finished" : "failed";
     text = `${outcome} in ${formatDuration(summary.elapsed_s)}`;
@@ -319,9 +321,6 @@ function applyEvent(event) {
       break;
     case "step_check_result":
       view.checking.delete(stepId);
-      break;
-    case "step_pending":
-      view.notes.delete(stepId);
       break;
     case "step_status":
       if (data.reconciled) view.reconciled.add(stepId);
