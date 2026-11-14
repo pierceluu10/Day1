@@ -51,8 +51,9 @@ class CountingLLM(AnthropicLLM):
 
 @pytest.fixture(scope="module")
 def db():
+    if not settings().mongodb_db.startswith("dayone_dev_"):
+        pytest.skip("writes locators; runs only against a dayone_dev_* database, never the demo DB")
     client = MongoClient(settings().mongodb_uri, tz_aware=True)  # as AtlasStore does; AtlasEventBus compares aware ts
-    assert settings().mongodb_db.startswith("dayone_dev_"), "this test writes locators; never run it on the demo DB"
     yield client[settings().mongodb_db]
     client.close()
 

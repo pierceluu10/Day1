@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import cache
 from pathlib import Path
 
@@ -27,20 +27,20 @@ def _required(name: str) -> str:
 
 @dataclass(frozen=True)
 class Settings:
-    mongodb_uri: str
+    mongodb_uri: str = field(repr=False)
     mongodb_db: str
-    anthropic_api_key: str
+    anthropic_api_key: str = field(repr=False)
     llm_model: str
     llm_timeout_s: float
-    voyage_api_key: str
+    voyage_api_key: str = field(repr=False)
     embedding_base_url: str
     embedding_model: str
     embedding_dimensions: int
     embedding_timeout_s: float
     gitea_url: str  # from the host (browser, API checks)
     gitea_admin_user: str
-    gitea_admin_password: str
-    gitea_hire_password: str
+    gitea_admin_password: str = field(repr=False)
+    gitea_hire_password: str = field(repr=False)
     exec_timeout_s: float
     api_port: int
     browser_headless: bool  # false for the demo; true in CI-style tests
