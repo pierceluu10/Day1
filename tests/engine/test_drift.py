@@ -104,3 +104,45 @@ def test_regressed_check_in_confirm_pass_is_reconciled(store: AtlasStore, tmp_pa
     assert ledger["s_first"].status == StepStatus.VERIFIED and ledger["s_first"].run_count == 2
     # Marked stale with everything after s_first, then re-verified by its check without a second run.
     assert ledger["s_second"].status == StepStatus.SKIPPED and ledger["s_second"].run_count == 1
+
+
+def _stale_steps(store: AtlasStore, hire: str) -> list[str]:
+    events = store.db["events"].find({"hire": hire, "type": "step_status", "data.status": "stale"})
+    return sorted(event["step_id"] for event in events)
+
+
+def test_check_that_regressed_while_no_runner_was_alive_is_drift(store: AtlasStore, tmp_path: Path) -> None:
+    steps = [marker_step(tmp_path, name) for name in ("s_a", "s_b", "s_c")]
+    opener = parts_opener(store, steps, FakeGitea(), FakeMemory(), FakeBrowser())
+    assert drive(store, "dead", Machine.UBUNTU, False, opener)
+    assert _drift_events(store, "dead") == []
+
+    (tmp_path / "s_b.done").unlink()  # changed between runs, e.g. while the agent was killed
+    assert drive(store, "dead", None, True, opener)
+
+    drift = _drift_events(store, "dead")
+    print("drift:", [(event["step_id"], event["data"]) for event in drift])
+    assert [event["step_id"] for event in drift] == ["s_b"]
+    assert "s_b.done missing" in drift[0]["data"]["reason"]
+    assert _stale_steps(store, "dead") == ["s_b", "s_c"], "the regressed step and everything after it"
+    ledger = store.steps("dead")
+    assert ledger["s_a"].status == StepStatus.VERIFIED and ledger["s_a"].run_count == 1
+    assert ledger["s_b"].status == StepStatus.VERIFIED and ledger["s_b"].run_count == 2
+    assert ledger["s_c"].status == StepStatus.SKIPPED and ledger["s_c"].run_count == 1, "re-verified, not re-run"
+
+
+def test_head_moved_while_no_runner_was_alive_is_drift(store: AtlasStore, tmp_path: Path) -> None:
+    gitea = FakeGitea()
+    steps = [clone_step(tmp_path, gitea), marker_step(tmp_path, "s_deps")]
+    opener = parts_opener(store, steps, gitea, FakeMemory(), FakeBrowser())
+    assert drive(store, "pushed", Machine.UBUNTU, False, opener)
+
+    gitea.head = NEW_HEAD  # push_change.sh while the agent was dead
+    assert drive(store, "pushed", None, True, opener)
+
+    drift = _drift_events(store, "pushed")
+    print("drift:", [(event["step_id"], event["data"]) for event in drift])
+    assert [event["step_id"] for event in drift] == [CLONE_STEP]
+    assert _stale_steps(store, "pushed") == sorted([CLONE_STEP, "s_deps"])
+    assert _runs(tmp_path) == [f"run {CLONE_STEP}", "run s_deps", f"run {CLONE_STEP}"]
+    assert store.steps("pushed")["s_deps"].status == StepStatus.SKIPPED
