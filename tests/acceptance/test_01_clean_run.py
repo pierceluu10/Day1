@@ -1,6 +1,7 @@
 """Acceptance 1: an empty Ubuntu container reaches passing tests with every step verified and evidence stored."""
 
 import re
+from collections import Counter
 
 import pytest
 
@@ -29,16 +30,24 @@ def test_empty_ubuntu_container_reaches_passing_tests(onboard, db, gitea, hires)
         print(f"{step_id:18} {doc.get('status')!s:20} runs={doc.get('run_count')} fix={doc.get('fix_source')} | {doc.get('evidence')}")
     assert sorted(steps) == sorted(STEP_IDS)
 
+    problems = []
     for step_id in STEP_IDS:
         doc = steps[step_id]
-        assert doc["status"] in DONE_STATUSES, f"{step_id}: {doc['status']}"
-        assert doc["status"] != StepStatus.SKIPPED, f"{step_id} passed its check on an empty container: the check is wrong"
-        assert doc["evidence"].strip(), f"{step_id} has no evidence"
-        assert doc["check_ever_failed"] is True, f"{step_id} never failed its check for {hire}: untrusted"
-        assert doc["run_count"] == 1, f"{step_id} run_count {doc['run_count']}"
-        if doc["status"] in REASONED:
-            assert doc["fix_source"] == REASONED[doc["status"]], f"{step_id}: {doc['fix_source']}"
-        assert doc.get("fix_source") != FixSource.EXACT_MEMORY, f"{step_id} claims an exact memory hit with empty memory"
+        if doc["status"] not in DONE_STATUSES:
+            problems.append(f"{step_id}: status {doc['status']}")
+        if doc["status"] == StepStatus.SKIPPED:
+            problems.append(f"{step_id} passed its check on an empty container: the check is wrong")
+        if not doc["evidence"].strip():
+            problems.append(f"{step_id} has no evidence")
+        if doc["check_ever_failed"] is not True:
+            problems.append(f"{step_id} never failed its check for {hire}: untrusted")
+        if doc["status"] == StepStatus.VERIFIED and doc["run_count"] != 1:
+            problems.append(f"{step_id} verified first try but run_count {doc['run_count']}")
+        if doc["status"] in REASONED and doc["fix_source"] != REASONED[doc["status"]]:
+            problems.append(f"{step_id}: {doc['status']} with fix_source {doc['fix_source']}")
+        if doc.get("fix_source") == FixSource.EXACT_MEMORY:
+            problems.append(f"{step_id} claims an exact memory hit with empty memory")
+    assert problems == []
 
     match = PASSED_COUNT.search(steps["t_run_tests"]["evidence"])
     assert match and int(match.group(1)) > 0, steps["t_run_tests"]["evidence"]
@@ -49,6 +58,12 @@ def test_empty_ubuntu_container_reaches_passing_tests(onboard, db, gitea, hires)
     assert local.stdout.strip() == gitea.branch_head(REPO, REPO_BRANCH)
 
     events = run_events(db, hire, run.run_id)
+    # Every fix attempt writes intent again, so a fixed step's run_count is 1 + its attempts.
+    pending_counts = Counter(event["step_id"] for event in of_type(events, EventType.STEP_PENDING))
+    for step_id in STEP_IDS:
+        assert steps[step_id]["run_count"] == pending_counts[step_id], (
+            f"{step_id}: run_count {steps[step_id]['run_count']} but {pending_counts[step_id]} step_pending events"
+        )
     assert events[0]["type"] == EventType.RUN_STARTED
     assert events[-1]["type"] == EventType.RUN_FINISHED
     for step_id in STEP_IDS:
