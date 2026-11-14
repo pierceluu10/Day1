@@ -41,13 +41,15 @@ Gitea is reset and hires 1 to 3 are run between 15:15 and 16:00 so the memory in
 
 ## Snags in `acme-api` (what the agent must discover; the README mentions none)
 
-| Snag | Fails as | Ubuntu 22.04 fix | Debian 12 | Alpine 3.20 |
+| Snag | Fails as (verbatim, from fresh containers) | Ubuntu 22.04 fix | Debian 12 | Alpine 3.20 |
 |---|---|---|---|---|
-| Runtime version: `requires-python >=3.12` | `ERROR: Package 'acme-api' requires a different Python: 3.10.12 not in '>=3.12'` (pip, from `-e .`) | install Python 3.12 (e.g. `uv python install 3.12`) | 3.11: same failure, same fix | 3.12 ships: no failure |
-| System package: `psycopg2` from source | `pg_config executable not found` / missing `gcc` | `apt-get install -y libpq-dev gcc python3-dev` | same | `apk add postgresql-dev gcc musl-dev python3-dev` (semantic + adapted) |
-| Settings file | `SettingsError: settings.toml not found (copy settings.example.toml)` | `cp settings.example.toml settings.toml` | same | same |
-| Database init | `sqlite3.OperationalError: no such table: users` | `python -m acme_api.db init` | same | same |
-| Mid-run change (`push_change.sh`) | new dep needs e.g. `libffi`/`libxml2` headers | `apt-get install -y libxml2-dev libxslt1-dev` | same | `apk add libxml2-dev libxslt-dev` |
+| Runtime: `requires-python = ">=3.12"` in `pyproject.toml` (`requirements.txt` is `-e .`) | `ERROR: Package 'acme-api' requires a different Python: 3.10.12 not in '>=3.12'`. Ubuntu's stock pip 22.0.2 reports this only once `pg_config` is present; without it the first error is psycopg2's (next row). | `curl -LsSf https://astral.sh/uv/install.sh \| sh`, `uv python install 3.12`, `uv venv --seed --python 3.12 .venv` | 3.11.2 with pip 23.0.1: `... requires a different Python: 3.11.2 not in '>=3.12'` (reported first); same fix | 3.12.13 ships: no failure |
+| System package: `psycopg2==2.9.10` (source only) | `Error: pg_config executable not found.`; with `libpq-dev` but no compiler: `error: [Errno 2] No such file or directory: 'cc'` | `apt-get install -y libpq-dev gcc` (with the uv Python no `python3-dev` is needed) | same as Ubuntu (not run on Debian) | `Error: pg_config executable not found.`; with `postgresql-dev` alone: `fatal error: Python.h: No such file or directory`. Fix: `apk add postgresql-dev gcc musl-dev python3-dev` |
+| Settings file | `acme_api.settings.SettingsError: settings.toml not found at /root/acme-api/settings.toml (copy settings.example.toml to settings.toml)` (10 errors, 3 passed) | `cp settings.example.toml settings.toml` | same | same |
+| Database init | `sqlite3.OperationalError: no such table: users` (10 errors, 3 passed) | `python -m acme_api.db init` (prints `created schema for sqlite:///acme.db`), then `13 passed` | same | same |
+| Mid-run change (`scripts/push_change.sh`): adds `python-ldap==3.4.8` (sdist only on PyPI) and `tests/test_directory.py` | `Modules/common.h:15:10: fatal error: lber.h: No such file or directory` | `apt-get install -y libldap2-dev libsasl2-dev`, then `14 passed` | same as Ubuntu (not run on Debian) | `apk add openldap-dev`, then `14 passed` |
+
+Proven in fresh `ubuntu:22.04` and `alpine:3.20` containers (Debian 12 for the runtime row only). Test count: 13 at seed, 14 after `push_change.sh`. pytest shows one harmless starlette deprecation warning.
 
 Exact names and versions are the infra session's call; this table is updated to match what really fails.
 

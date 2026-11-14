@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Day One</title>
+  <link rel="stylesheet" href="style.css">
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <header class="top">
+    <h1>Day One</h1>
+    <nav class="hires" aria-label="Hires" id="hires"></nav>
+  </header>
+
+  <form class="start" id="start">
+    <label class="field">
+      <span>New hire</span>
+      <input id="hire-name" name="hire" list="hire-names" autocomplete="off" required pattern="[a-z]+" placeholder="barbara">
+      <datalist id="hire-names"></datalist>
+    </label>
+    <fieldset class="machines">
+      <legend>Laptop</legend>
+      <label><input type="radio" name="machine" value="ubuntu" checked><span>ubuntu</span></label>
+      <label><input type="radio" name="machine" value="debian"><span>debian</span></label>
+      <label><input type="radio" name="machine" value="alpine"><span>alpine</span></label>
+    </fieldset>
+    <button type="submit" class="primary">Start</button>
+    <p class="form-error" id="form-error" role="alert" hidden></p>
+  </form>
+
+  <main class="run" id="run" hidden>
+    <section class="run-head" aria-live="polite">
+      <div class="run-title">
+        <h2 id="run-hire"></h2>
+        <p id="run-state" class="run-state"></p>
+      </div>
+      <button type="button" id="resume" class="secondary" hidden>Resume</button>
+    </section>
+    <ul class="notices" id="notices"></ul>
+    <ol class="steps" id="steps"></ol>
+    <section class="compare" id="compare" aria-label="Hire 1 compared with this hire"></section>
+    <section class="terminal" aria-label="Terminal">
+      <pre id="terminal"></pre>
+    </section>
+  </main>
+
+  <p class="empty" id="empty">Reading runs from Atlas…</p>
+</body>
+</html>

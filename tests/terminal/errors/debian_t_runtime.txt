@@ -1,0 +1,1 @@
+/root/acme-api/.venv/bin/python is Python 3.11.2, but /root/acme-api/pyproject.toml requires-python = '>=3.12'

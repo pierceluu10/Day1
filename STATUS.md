@@ -55,4 +55,15 @@ Integration branch: `claude/day-one-mongodb-agent-6cc839` (orchestrator session)
 
 ## In progress / blocked / next
 
-Updated by the orchestrator after each merge.
+Updated 13:25.
+
+All seven branches merged into integration and their suites pass there (engine, memory, overlay, infra, API, terminal fast tests; browser in-session).
+
+**Ada (hire 1, ubuntu) green end to end at 13:23**: 13/13 steps done in Atlas `dayone`. Four snags fixed by reasoning (runtime, system package, settings, db init; 5 LLM calls). Crash (13:17, failed step) then `dayone resume`: 10 done steps reconciled in 15 s with run_count unchanged, failed step retried and fixed. SSH key verified by API + `ssh -T`; clone `8094472 = 8094472`; Welcome checklist 6/6 via API.
+
+Open:
+- Memory (5): saved `t_init_db` fix kept the failed `make migrate`; blocks hire 2 zero-LLM replay.
+- Terminal (3): `t_run_tests` check runs pytest itself, so it is always `skipped`/untrusted; moving to a HEAD-keyed junit report written by run().
+- Page (6): testing Start with a real grace run.
+
+Next: grace (debian, hire 2) from memory; kill -9 harness (QA); push_change live; ken on alpine; measure.
