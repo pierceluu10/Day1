@@ -40,7 +40,7 @@ Gitea is reset and hires 1 to 3 are run between 15:15 and 16:00 so the memory in
 
 | Snag | Fails as | Ubuntu 22.04 fix | Debian 12 | Alpine 3.20 |
 |---|---|---|---|---|
-| Runtime version: `requires-python >=3.12` | pip/venv error "requires a different Python: 3.10.12" | install Python 3.12 (e.g. `uv python install 3.12`) | 3.11: same failure, same fix | 3.12 ships: no failure |
+| Runtime version: `requires-python >=3.12` | `ERROR: Package 'acme-api' requires a different Python: 3.10.12 not in '>=3.12'` (pip, from `-e .`) | install Python 3.12 (e.g. `uv python install 3.12`) | 3.11: same failure, same fix | 3.12 ships: no failure |
 | System package: `psycopg2` from source | `pg_config executable not found` / missing `gcc` | `apt-get install -y libpq-dev gcc python3-dev` | same | `apk add postgresql-dev gcc musl-dev python3-dev` (semantic + adapted) |
 | Settings file | `SettingsError: settings.toml not found (copy settings.example.toml)` | `cp settings.example.toml settings.toml` | same | same |
 | Database init | `sqlite3.OperationalError: no such table: users` | `python -m acme_api.db init` | same | same |
