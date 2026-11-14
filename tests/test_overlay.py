@@ -54,6 +54,24 @@ def test_ring_surrounds_target_in_mode_color(page, mode):
     assert ring["tag"].endswith("· ada")
 
 
+TAG_BOX_JS = """() => {
+    const tag = document.querySelector('[data-dayone-overlay]').shadowRoot.querySelector('.tag');
+    const r = tag.getBoundingClientRect();
+    return {top: r.top, bottom: r.bottom};
+}"""
+
+
+@pytest.mark.parametrize(("bbox", "side"), [([20, 80, 300, 30], "below"), ([20, 680, 300, 30], "above")])
+def test_tag_sits_below_target_unless_no_room(page, bbox, side):
+    # Below by default so it never covers the field's own label; above only near the viewport's bottom edge.
+    page.evaluate("b => window.__dayone.mark({mode: 'moved', bbox: b})", bbox)
+    page.wait_for_timeout(400)
+    tag = page.evaluate(TAG_BOX_JS)
+    top, bottom = bbox[1], bbox[1] + bbox[3]
+    print(side, bbox, tag, page.viewport_size)
+    assert tag["top"] > bottom if side == "below" else tag["bottom"] < top
+
+
 def test_missing_target_frames_viewport_with_moved_label(page):
     page.evaluate("window.__dayone.mark({mode: 'moved', selector: '#gone'})")
     page.wait_for_timeout(400)
