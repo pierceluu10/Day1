@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from playwright.sync_api import Error as PlaywrightError
+
 from dayone.contracts import (
     WELCOME_CHECKLIST,
     CheckResult,
@@ -101,3 +103,60 @@ def test_events_tail_in_emit_order_across_processes(store: AtlasStore) -> None:
     assert [event.data.get("chunk") for event in events[:50]] == [str(index) for index in range(50)]
     assert events[-1].type == EventType.RUN_RESUMED
     assert all(a.ts < b.ts for a, b in zip(events, events[1:], strict=False)), "ts must be strictly increasing"
+
+
+SIGN_IN_ERROR = "Timeout 30000ms exceeded waiting for locator('#user_name')"
+
+
+def raising_run_step(workdir: Path, executor: FakeExecutor) -> Step:
+    marker = workdir / "signed_in"
+
+    def run(context: StepContext) -> RunResult:
+        if not any(command == FIX_COMMAND for command, _ in executor.commands):
+            raise PlaywrightError(SIGN_IN_ERROR)
+        marker.touch()
+        return RunResult(ok=True, output="signed in")
+
+    def check(context: StepContext) -> CheckResult:
+        if marker.exists():
+            return CheckResult(ok=True, evidence="API /user = ada")
+        return CheckResult(ok=False, evidence="not signed in", error_text="GET /user -> 401")
+
+    return Step(id="b_sign_in", kind=StepKind.BROWSER, title="sign in", check=check, run=run)
+
+
+def test_exception_from_run_is_a_failed_run_that_reaches_memory(store: AtlasStore, tmp_path: Path) -> None:
+    executor = FakeExecutor()
+    memory = FakeMemory(fixes=[FixProposal(commands=(FIX_COMMAND,), source=FixSource.REASONING, rationale="retry")])
+    opener = parts_opener(store, [raising_run_step(tmp_path, executor)], FakeGitea(), memory, FakeBrowser(), executor)
+    assert drive(store, "raiser", Machine.UBUNTU, False, opener)
+
+    (failure,) = memory.failures
+    print("error text given to memory:", failure.error_text)
+    assert failure.error_text == f"Error: {SIGN_IN_ERROR}", "the exception, not the check's 401, is the error"
+    assert store.steps("raiser")["b_sign_in"].status == StepStatus.FIXED_BY_REASONING
+    trace = store.db["events"].find_one(
+        {"hire": "raiser", "type": "terminal_output", "data.command": "b_sign_in.run()"}
+    )
+    assert trace is not None and SIGN_IN_ERROR in trace["data"]["chunk"]
+
+
+def test_exception_from_check_is_a_failed_check(store: AtlasStore, tmp_path: Path) -> None:
+    marker = tmp_path / "done"
+
+    def check(context: StepContext) -> CheckResult:
+        if not marker.exists():
+            raise ConnectionError("gitea refused connection")
+        return CheckResult(ok=True, evidence="done present")
+
+    def run(context: StepContext) -> RunResult:
+        marker.touch()
+        return RunResult(ok=True, output="")
+
+    step = Step(id="t_flaky", kind=StepKind.TERMINAL, title="flaky", check=check, run=run)
+    assert drive(
+        store, "flaky", Machine.UBUNTU, False, parts_opener(store, [step], FakeGitea(), FakeMemory(), FakeBrowser())
+    )
+    doc = store.db["steps"].find_one({"hire": "flaky", "step_id": "t_flaky"})
+    assert doc["status"] == StepStatus.VERIFIED and doc["run_count"] == 1
+    assert doc["check_ever_failed"], "the raising check counts as the failure before the pass"

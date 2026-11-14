@@ -11,6 +11,7 @@ import os
 import socket
 import threading
 import time
+import traceback
 import uuid
 from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager
@@ -40,6 +41,7 @@ from dayone.contracts import (
     Machine,
     Memory,
     Resolution,
+    RunResult,
     Step,
     StepContext,
     StepStatus,
@@ -322,13 +324,15 @@ class Run:
             return True
 
         self._intend(step)
-        ran = step.run(self._context(step))
+        ran, raised = self._run(step)
         check = self._check(step)
         if check.ok:
             self._finish(step, StepStatus.VERIFIED, check, None, reconciled=False)
             return True
 
-        return self._repair(step, check.error_text or ran.output or check.evidence)
+        # An exception from run() is the most specific account of what went wrong, so it leads.
+        error_text = ran.output if raised else check.error_text or ran.output or check.evidence
+        return self._repair(step, error_text)
 
     def _repair(self, step: Step, error_text: str) -> bool:
         fingerprint = self.parts.fingerprint(error_text)
@@ -366,7 +370,7 @@ class Run:
                 failed = CheckResult(ok=False, evidence=f"fix command failed: {command}", error_text=result.output)
                 self.store.record_check(self.hire.name, step.id, failed)
                 return failed
-        step.run(self._context(step))
+        self._run(step)
         return self._check(step)
 
     def _intend(self, step: Step) -> None:
@@ -374,8 +378,21 @@ class Run:
         record = self.store.mark_pending(self.hire.name, step.id, key)
         self.events.emit(EventType.STEP_PENDING, step.id, run_count=record.run_count, idempotency_key=key)
 
+    def _run(self, step: Step) -> tuple[RunResult, bool]:
+        """run() at the step boundary; an exception is a failed run whose message is the error. True if raised."""
+        try:
+            return step.run(self._context(step)), False
+        # Broad on purpose: steps call Playwright, Docker and HTTP, and any failure there must reach repair.
+        except Exception as error:  # noqa: BLE001
+            return RunResult(ok=False, output=self._raised(step, "run", error)), True
+
     def _check(self, step: Step) -> CheckResult:
-        check = step.check(self._context(step))
+        try:
+            check = step.check(self._context(step))
+        # Broad on purpose: steps call Playwright, Docker and HTTP; a check that cannot run has not passed.
+        except Exception as error:  # noqa: BLE001
+            text = self._raised(step, "check", error)
+            check = CheckResult(ok=False, evidence=f"check raised {type(error).__name__}", error_text=text)
         self.store.record_check(self.hire.name, step.id, check)
         self.events.emit(
             EventType.STEP_CHECK_RESULT, step.id, ok=check.ok, evidence=check.evidence, detail=check.detail
@@ -383,6 +400,13 @@ class Run:
         if check.ok and step.id == CLONE_STEP:
             self.clone_head = check.detail[CLONE_HEAD_KEY]
         return check
+
+    def _raised(self, step: Step, phase: str, error: Exception) -> str:
+        log.warning("%s.%s() raised", step.id, phase, exc_info=error)
+        text = f"{type(error).__name__}: {error}"
+        trace = "".join(traceback.format_exception(error))
+        self.events.emit(EventType.TERMINAL_OUTPUT, step.id, command=f"{step.id}.{phase}()", chunk=trace)
+        return text
 
     def _finish(
         self, step: Step, status: StepStatus, check: CheckResult, resolution: Resolution | None, reconciled: bool
