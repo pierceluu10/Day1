@@ -1,4 +1,4 @@
-// Day One overlay, injected with page.add_init_script() into the browser the agent drives.
+// Preflight overlay, injected with page.add_init_script() into the browser the agent drives.
 // Python drives it with page.evaluate:
 //   window.__dayone.mark({ mode: "memory" | "reasoning" | "moved", selector?, bbox?: [x, y, w, h], label? })
 //   window.__dayone.clear()

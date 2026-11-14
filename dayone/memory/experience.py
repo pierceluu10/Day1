@@ -585,9 +585,9 @@ class ExperienceMemory:
             f"{len(experience['hires'])} new hires ({', '.join(experience['hires'])}) on {facts.summary()} "
             f"hit this during `{context['step_id']}`, and the README does not mention it:\n\n"
             f"```\n{error_lines}\n```\n\n"
-            f"Day One fixed it with these commands, verified by the step's check (`{experience['verified_by_check']}`):\n\n"
+            f"Preflight fixed it with these commands, verified by the step's check (`{experience['verified_by_check']}`):\n\n"
             f"```sh\n{command_lines}\n```\n\n"
             "Proposed change: add these commands to the README's setup section for this platform.\n\n"
-            f"Opened by Day One from experience `{experience['_id']}`, applied {experience['uses']} times."
+            f"Opened by Preflight from experience `{experience['_id']}`, applied {experience['uses']} times."
         )
         return title, body

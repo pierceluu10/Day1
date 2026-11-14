@@ -1,4 +1,4 @@
-# Day One: master brief (MongoDB hackathon, Track 3)
+# Preflight: master brief (MongoDB hackathon, Track 3)
 
 This is the human's brief, kept verbatim in substance. Every session reads it first. `docs/DEMO.md` is the demo we build toward; `STATUS.md` holds ownership and progress; `dayone/contracts.py` is the shared interface.
 
@@ -15,11 +15,11 @@ Hard stop: feature freeze 16:00 local, submission 17:00.
 - Rules: all code is written today in this repo (third-party libraries are fine). The repo will be public: never commit secrets; `.env` is git-ignored. No Streamlit. No project where a dashboard is the main feature: no charts, gauges or metric tiles. Must use the hackathon's MongoDB Atlas cluster via `MONGODB_URI`.
 - Honesty: never report a step as done unless its check ran and passed. Every number shown is computed from Atlas. Anything pre-recorded is labelled on screen.
 
-## 1. What Day One is
+## 1. What Preflight is
 
 New hires lose their first days going back and forth with an AI chat to set up their machine. Each one hits the same broken steps, solves them alone, and the fix is lost.
 
-Day One is an agent the new hire starts with one command. It sets them up end to end, in the browser (account and access on the company's Git service) and in the terminal (their machine), until the team's tests pass. It confirms every step really took effect, resumes after a kill or restart with nothing done twice, adapts when the repository changes mid-setup, and saves every error-and-fix so the next hire never hits it. Hire five is set up in a fraction of the time of hire one, including on a machine type it has never seen.
+Preflight is an agent the new hire starts with one command. It sets them up end to end, in the browser (account and access on the company's Git service) and in the terminal (their machine), until the team's tests pass. It confirms every step really took effect, resumes after a kill or restart with nothing done twice, adapts when the repository changes mid-setup, and saves every error-and-fix so the next hire never hits it. Hire five is set up in a fraction of the time of hire one, including on a machine type it has never seen.
 
 ## 2. Systems (all local, real, no mocks of the systems the agent acts on)
 

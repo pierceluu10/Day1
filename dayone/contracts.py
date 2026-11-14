@@ -1,4 +1,4 @@
-"""Shared interfaces between Day One's parts.
+"""Shared interfaces between Preflight's parts.
 
 Owned by the orchestrator session. Do not change this file without telling it:
 every other session builds against these names and shapes.
