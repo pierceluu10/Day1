@@ -55,4 +55,14 @@ Integration branch: `claude/day-one-mongodb-agent-6cc839` (orchestrator session)
 
 ## In progress / blocked / next
 
-Updated by the orchestrator after each merge.
+Updated 12:55.
+
+Merged into integration: infra (Gitea, seed, GiteaClient, reset_hire, acme-api), engine (+ step-exception boundary, reset), terminal, browser, memory (+ locator goal fix), `dayone/steps/__init__.py`, index creation in wiring.
+
+**13:15 checkpoint met at 12:51**: real ada/ubuntu run in Atlas `dayone`: 2 terminal steps verified, crash in `b_sign_in`, resume re-checked them (run_count stayed 1), `b_sign_in` pending was checked first, then 9 more steps verified or fixed: SSH key verified by API + `ssh -T`, clone `8094472 = 8094472`, runtime / system package / settings fixed by reasoning. Run ended FAILED at `t_init_db` (honestly recorded).
+
+Open bugs (assigned):
+- Memory (5): semantic hits cross steps (t_runtime fix offered for t_system_package/t_settings/t_init_db at 0.81 to 0.84); saved `fix_commands` include failed proposals; reasoning never sees its commands' output, so `t_init_db` failed after 3 attempts.
+- Browser (4): `b_open_welcome` passes vacuously after `tick_checklist` navigates to the issue (untrusted); validate element fits action.
+
+Next: merge those fixes, `dayone reset ada`, full ada run to green (14:30 checkpoint), then kill -9 at random points.
