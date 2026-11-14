@@ -18,14 +18,17 @@ Gitea is reset and hires 1 to 3 are run between 15:15 and 16:00 so the memory in
 
 - Left two thirds: the headed Chromium window the agent drives, with `intern_overlay.js` rings (green = acting from memory, amber = reasoning, red "This moved." = a saved locator failed).
 - Right third: the Day One page (`http://localhost:8000`): step list with status and one evidence line each, the streaming terminal below it, and one line "ada (hire 1): 9m 12s, 6 errors, 0 from memory · barbara: 2m 05s, 6 errors, 6 from memory", computed from Atlas.
-- A terminal tab for `kill -9` and `push_change.sh`.
+- A terminal tab for `scripts/move_ui.sh`, `kill -9` and `scripts/push_change.sh`.
 
 ## Run-of-show (3 minutes)
+
+`scripts/move_ui.sh` restarts Gitea, so it runs only before Start (never once the agent is past `b_sign_in`: a clone or `ssh -T` during the restart fails). `scripts/restore_ui.sh` undoes it; `scripts/reset.sh` calls it.
 
 | Time | What the audience sees | Track 3 question |
 |---|---|---|
 | 0:00 | One sentence: every new hire hits the same broken setup steps and the fix is lost. Day One fixes that. Page shows ada's recorded run: 9 minutes, 6 errors, all solved by reasoning. | |
-| 0:15 | Type `barbara`, pick ubuntu, Start. Chromium signs in, adds the SSH key with a green ring (locator from memory). | Q1 |
+| 0:10 | In the terminal tab: `scripts/move_ui.sh` ("we just changed Gitea's SSH-key form"). Gitea restarts for 2 to 3 s; wait for it to return before Start. | Q3 |
+| 0:15 | Type `barbara`, pick ubuntu, Start. Chromium signs in with a green ring (locator from memory). At the key form the saved locator fails: red "This moved.", then amber while it reasons over the page's accessibility text, finds the new fields, adds the key and saves the new locator. | Q3, Q1 |
 | 0:35 | SSH key step turns verified only after two independent checks: "API lists key SHA256:…; ssh -T: authenticated". Clone verified: "local HEAD 3f2a1c9 = API HEAD 3f2a1c9". | Q1 |
 | 0:50 | `pip install` fails with `pg_config executable not found`. Instantly: "fixed from memory: exact match, from ada, applied 2×". No LLM call. | memory |
 | 1:05 | In the terminal tab: `kill -9` the agent mid-step. Page shows the run stopped with one step `pending`. | Q2 |
