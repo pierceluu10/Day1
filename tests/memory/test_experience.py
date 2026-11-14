@@ -22,6 +22,7 @@ from dayone.contracts import (
 from dayone.memory.experience import (
     FIX_OUTPUT,
     MAX_REASONING_ATTEMPTS,
+    MAX_REJECTED_REPLIES,
     REASON_SYSTEM,
     SEMANTIC_MIN_SIMILARITY,
     ExperienceMemory,
@@ -213,10 +214,13 @@ def test_reasoning_stops_after_three_attempts_and_feeds_back_each_new_error(harn
 
     assert not resolution.fixed and resolution.proposal is None
     assert resolution.attempts == len(calls) == 3
-    assert resolution.llm_calls == len(llm.prompts) == 3
+    # A rejected reply is re-asked without costing a try, so calls may exceed tries by up to MAX_REJECTED_REPLIES.
+    assert resolution.llm_calls == len(llm.prompts)
+    assert MAX_REASONING_ATTEMPTS <= resolution.llm_calls <= MAX_REASONING_ATTEMPTS + MAX_REJECTED_REPLIES
     assert resolution.last_check.error_text == new_errors[2]
-    assert new_errors[0] in llm.prompts[1] and new_errors[1] in llm.prompts[2]
-    assert all(command in llm.prompts[1] for command in calls[0].commands), "prior commands are fed back"
+    assert not any(error in llm.prompts[0] for error in new_errors)
+    assert new_errors[0] in llm.prompts[-1] and new_errors[1] in llm.prompts[-1], "each new error is fed back"
+    assert all(command in llm.prompts[-1] for command in calls[0].commands), "prior commands are fed back"
     assert len(events.of(EventType.MEMORY_MISS)) == 1 and len(events.of(EventType.REASONING_STARTED)) == 1
     assert [attempt["ok"] for attempt in events.of(EventType.FIX_ATTEMPT)] == [False] * 3
     assert experiences.count_documents({"outcome": "failed"}) == 3
@@ -393,6 +397,8 @@ def test_guard_makes_model_commands_runnable_unattended():
         '```json\n{"inspect": ["grep -rn init ."], "commands": ["apt-get update"], "rationale": "refresh"}\n```'
     )
     assert inspect == ("grep -rn init . || true",), "a grep with no match must not abort the attempt"
+    inspect, _, _ = parse_fix('{"inspect": ["ls docs || true"], "commands": ["true"]}')
+    assert inspect == ("ls docs || true",)
     assert commands == ("apt-get update",) and rationale == "refresh"
     inspect, _, _ = parse_fix(r"""{"inspect": ["grep -rn 'init_db\|schema' ."], "commands": ["true"]}""")
     assert inspect == (r"grep -rn 'init_db\|schema' . || true",), "an undoubled backslash is kept literally"

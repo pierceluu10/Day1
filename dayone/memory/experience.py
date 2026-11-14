@@ -62,6 +62,7 @@ APT_INSTALL = re.compile(r"^(apt-get|apt)\s+install\b")
 ASSUME_YES = re.compile(r"\s(-y|--yes|--assume-yes)\b")
 SUDO = "sudo "
 APT_NONINTERACTIVE = "DEBIAN_FRONTEND=noninteractive "
+NON_ABORTING = "|| true"
 
 FIX_RULES = f"""Commands run as root with `sh -lc` in the new hire's throwaway container, in {REPO_DIR} when it exists.
 Use the machine's own package manager. Non-interactive only (-y, --no-cache), no sudo, one command per string,
@@ -178,7 +179,10 @@ def parse_fix(reply: str) -> tuple[tuple[str, ...], tuple[str, ...], str]:
     if not commands:
         raise LLMResponseError("no runnable commands in the reply")
     # try_fix stops at the first failing command, and a grep with no match exits 1: inspection must never abort the fix.
-    inspect = tuple(f"{command} || true" for command in guard_commands(_strings(body, "inspect")))
+    inspect = tuple(
+        command if command.endswith(NON_ABORTING) else f"{command} {NON_ABORTING}"
+        for command in guard_commands(_strings(body, "inspect"))
+    )
     return inspect, commands, str(body.get("rationale", ""))
 
 
