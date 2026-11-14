@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import socket
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from collections.abc import Iterator
 from typing import Any
 
@@ -20,8 +20,6 @@ from harness import Agent, requires, requires_system
 
 pytestmark = [pytest.mark.system, requires_system, requires("dayone.api")]
 
-BASELINE = "ada"
-HIRE = "grace"
 COMPARE_PATH = "/api/compare/{hire}"
 STEPS_PATH = "/api/hires/{hire}/steps"
 NUMBER_FIELDS = ("elapsed_s", "errors", "fixes_from_memory", "llm_calls")
@@ -48,6 +46,30 @@ def numeric_leaves(value: Any, path: str = "") -> Iterator[tuple[str, float]]:
     elif isinstance(value, list):
         for index, item in enumerate(value):
             yield from numeric_leaves(item, f"{path}[{index}]")
+
+
+def as_served(value: Any) -> Any:
+    """An Atlas value as JSON shows it: datetimes (stored naive UTC) as ISO strings, compared as instants below."""
+    if isinstance(value, datetime):
+        return Instant(value.replace(tzinfo=timezone.utc))
+    if isinstance(value, dict):
+        return {key: as_served(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [as_served(item) for item in value]
+    return value
+
+
+class Instant:
+    """Equal to any ISO string naming the same moment, whatever its offset format."""
+
+    def __init__(self, moment: datetime) -> None:
+        self.moment = moment
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, str) and datetime.fromisoformat(other) == self.moment
+
+    def __repr__(self) -> str:
+        return self.moment.isoformat()
 
 
 def dicts_with(value: Any, key: str) -> Iterator[dict[str, Any]]:
@@ -81,17 +103,18 @@ def api(log_dir, monkeypatch) -> Iterator[httpx.Client]:
     server.kill()
 
 
-def test_api_numbers_match_atlas(onboard, db, api):
-    for hire, machine in ((BASELINE, Machine.UBUNTU), (HIRE, Machine.UBUNTU)):
-        assert onboard(hire, machine).exit_code == 0
+def test_api_numbers_match_atlas(onboard, db, api, hires):
+    baseline, current = hires["first"], hires["second"]
+    for name in {baseline, current}:
+        assert onboard(name, Machine.UBUNTU).exit_code == 0
 
-    response = api.get(COMPARE_PATH.format(hire=HIRE))
+    response = api.get(COMPARE_PATH.format(hire=current))
     assert response.status_code == 200, response.text
     compare = response.json()
-    print(f"GET {COMPARE_PATH.format(hire=HIRE)} -> {compare}")
+    print(f"GET {COMPARE_PATH.format(hire=current)} -> {compare}")
 
     entries = {entry["hire"]: entry for entry in dicts_with(compare, "hire")}
-    assert {BASELINE, HIRE} <= set(entries), f"compare does not show both {BASELINE} and {HIRE}: {sorted(entries)}"
+    assert {baseline, current} <= set(entries), f"compare does not show both {baseline} and {current}: {sorted(entries)}"
     mismatches = []
     for hire, entry in entries.items():
         expected = numbers(db, hire)
@@ -106,7 +129,7 @@ def test_api_numbers_match_atlas(onboard, db, api):
     uncompared = [path for path, _ in numeric_leaves(compare) if path.rsplit(".", 1)[-1] not in NUMBER_FIELDS]
     assert uncompared == [], f"compare serves numbers this test does not check against Atlas: {uncompared}"
 
-    for hire in (BASELINE, HIRE):
+    for hire in (baseline, current):
         response = api.get(STEPS_PATH.format(hire=hire))
         assert response.status_code == 200, response.text
         served = list(dicts_with(response.json(), "step_id"))
@@ -117,7 +140,5 @@ def test_api_numbers_match_atlas(onboard, db, api):
             assert {"status", "evidence"} <= step.keys(), step
             for key in step.keys():
                 assert key in doc or not isinstance(step[key], int | float), f"{hire}/{step['step_id']}.{key} is not an Atlas field"
-                if key in doc and isinstance(doc[key], datetime):
-                    assert datetime.fromisoformat(step[key]).replace(tzinfo=None) == doc[key], f"{hire}/{step['step_id']}.{key}"
-                elif key in doc:
-                    assert step[key] == doc[key], f"{hire}/{step['step_id']}.{key}: API {step[key]!r} vs Atlas {doc[key]!r}"
+                if key in doc:
+                    assert as_served(doc[key]) == step[key], f"{hire}/{step['step_id']}.{key}: API {step[key]!r} vs Atlas {doc[key]!r}"

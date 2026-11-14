@@ -5,14 +5,13 @@ a step left `pending` by a kill gets a check result before any re-run; the ledge
 with the event log; the final state matches a clean run of the same hire (statuses may differ only
 by a step being `skipped`; evidence equal once key fingerprints and durations are masked).
 
-Mutates Gitea: commits one file to acme/acme-api to cause drift (scripts/reset.sh restores the repo).
+Drift is caused inside the hire's own container (its checkout is moved back one commit while the agent
+is dead), so a verified check no longer passes; shared Gitea and acme/acme-api are never touched.
 """
 
 from __future__ import annotations
 
-import base64
 import re
-import time
 from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -21,15 +20,15 @@ from typing import Any
 import pytest
 
 from atlas import ledger, of_type, run_events
-from dayone.contracts import DONE_STATUSES, REPO, REPO_BRANCH, STEP_IDS, EventType, Machine, StepStatus
-from harness import Agent, EventWatcher, requires_system
+from dayone.contracts import DONE_STATUSES, REPO_DIR, STEP_IDS, EventType, Machine, StepStatus
+from harness import Agent, EventWatcher, container_exec, requires_system
 
 pytestmark = [pytest.mark.system, requires_system]
 
-HIRE = "barbara"
-MEMORY_DONOR = "ada"
-DRIFT_PATH = "qa/drift-{ns}.md"
+DRIFT_STEP = "t_clone"
+DRIFT_COMMAND = f"git -C {REPO_DIR} reset -q --hard HEAD~1"
 DOWNSTREAM_OF_HEAD = STEP_IDS[STEP_IDS.index("t_clone") :]
+MAX_RUNS_AFTER_ONE_KILL = 2  # the run the kill interrupted, then one re-run
 TERMINAL_HEAVY_STEPS = frozenset({"t_install_deps", "t_run_tests"})
 VOLATILE = (
     (re.compile(r"SHA256:[A-Za-z0-9+/=]+"), "SHA256:<key>"),
@@ -44,7 +43,7 @@ Predicate = Callable[[dict[str, Any], str | None], bool]
 class KillPoint:
     name: str
     predicate: Predicate
-    drift_before_resume: bool = False  # the drift commit lands while the agent is dead
+    drift_before_resume: bool = False  # a verified step is broken while the agent is dead
 
 
 def is_event(type: EventType, step_id: str | None = None) -> Predicate:
@@ -70,20 +69,12 @@ def mask(evidence: str) -> str:
     return evidence
 
 
-def push_drift_commit(gitea) -> str:
-    path = DRIFT_PATH.format(ns=time.time_ns())
-    gitea.request(
-        "POST",
-        f"/repos/{REPO}/contents/{path}",
-        json={
-            "content": base64.b64encode(b"QA drift marker\n").decode(),
-            "message": f"qa: drift marker {path}",
-            "branch": REPO_BRANCH,
-        },
-    )
-    head = gitea.branch_head(REPO, REPO_BRANCH)
-    print(f"pushed {path}; {REPO} {REPO_BRANCH} HEAD is now {head}")
-    return head
+def break_verified_step(hire: str, steps: dict[str, dict[str, Any]]) -> None:
+    assert steps[DRIFT_STEP]["status"] in DONE_STATUSES, f"{DRIFT_STEP} not done yet, so breaking it is not drift"
+    moved = container_exec(hire, DRIFT_COMMAND)
+    assert moved.returncode == 0, moved.stdout + moved.stderr
+    head = container_exec(hire, f"git -C {REPO_DIR} rev-parse --short HEAD").stdout.strip()
+    print(f"drift: `{DRIFT_COMMAND}` in {hire}'s container, local HEAD now {head}")
 
 
 def invalidated_by(event: dict[str, Any]) -> list[str]:
@@ -125,31 +116,32 @@ def print_ledger(title: str, steps: dict[str, dict[str, Any]]) -> None:
         print(f"  {step_id:18} {doc.get('status')!s:20} runs={doc.get('run_count')} | {doc.get('evidence')}")
 
 
-def test_kill_nine_at_five_points_then_resume(onboard, db, gitea, log_dir, fresh_hire):
-    donor = onboard(MEMORY_DONOR, Machine.UBUNTU)
-    assert donor.exit_code == 0, f"{MEMORY_DONOR}'s run must succeed first so {HIRE} resolves from memory"
+def test_kill_nine_at_five_points_then_resume(onboard, db, log_dir, fresh_hire, hires):
+    hire, donor_name = hires["killed"], hires["first"]
+    donor = onboard(donor_name, Machine.UBUNTU)
+    assert donor.exit_code == 0, f"{donor_name}'s run must succeed first so {hire} resolves from memory"
 
-    fresh_hire(HIRE)
-    watcher = EventWatcher(db, HIRE)
-    agent = Agent(log_dir, "start", "--hire", HIRE, "--machine", Machine.UBUNTU.value)
+    fresh_hire(hire)
+    watcher = EventWatcher(db, hire)
+    agent = Agent(log_dir, "start", "--hire", hire, "--machine", Machine.UBUNTU.value)
     pending_at_kill: list[set[str]] = []
     for point in KILL_POINTS:
         watcher.wait_for(agent, point.name, point.predicate)
         agent.kill()
-        steps = ledger(db, HIRE)
+        steps = ledger(db, hire)
         pending = {step_id for step_id, doc in steps.items() if doc["status"] == StepStatus.PENDING}
         pending_at_kill.append(pending)
         print_ledger(f"after kill -9 {point.name}: pending {sorted(pending)}", steps)
         if point.drift_before_resume:
-            push_drift_commit(gitea)
-        agent = Agent(log_dir, "resume", "--hire", HIRE)
+            break_verified_step(hire, steps)
+        agent = Agent(log_dir, "resume", "--hire", hire)
     assert agent.wait() == 0, agent.output_tail()
 
-    killed = ledger(db, HIRE)
+    killed = ledger(db, hire)
     print_ledger("final ledger after five kills", killed)
-    run_ids = {event["run_id"] for event in db.events.find({"hire": HIRE}, {"run_id": 1})}
+    run_ids = {event["run_id"] for event in db.events.find({"hire": hire}, {"run_id": 1})}
     assert len(run_ids) == 1, f"resume must keep the run_id, saw {run_ids}"
-    events = run_events(db, HIRE, run_ids.pop())
+    events = run_events(db, hire, run_ids.pop())
 
     assert reruns_after_done(events) == []
 
@@ -173,10 +165,10 @@ def test_kill_nine_at_five_points_then_resume(onboard, db, gitea, log_dir, fresh
     assert any(pending_at_kill), "no kill left a step pending: the kill points did not land mid-step"
 
     # Reference: the same hire, same repo HEAD, same memory, never killed.
-    fresh_hire(HIRE)
-    reference_agent = Agent(log_dir, "start", "--hire", HIRE, "--machine", Machine.UBUNTU.value)
+    fresh_hire(hire)
+    reference_agent = Agent(log_dir, "start", "--hire", hire, "--machine", Machine.UBUNTU.value)
     assert reference_agent.wait() == 0, reference_agent.output_tail()
-    clean = ledger(db, HIRE)
+    clean = ledger(db, hire)
     print_ledger("clean reference run", clean)
     differences = [
         f"{step_id}: killed {killed[step_id]['status']} vs clean {clean[step_id]['status']}"
@@ -188,3 +180,14 @@ def test_kill_nine_at_five_points_then_resume(onboard, db, gitea, log_dir, fresh
         if mask(killed[step_id]["evidence"]) != mask(clean[step_id]["evidence"])
     ]
     assert differences == []
+
+    # Leftovers of a killed run (e.g. an apt-get still holding the dpkg lock) must not cost the resume:
+    # a step the clean run verified first try needs only the killed run plus one re-run, with no error.
+    errored = {event["step_id"] for event in of_type(events, EventType.ERROR_CAPTURED)}
+    collateral = [
+        f"{step_id}: run_count {killed[step_id]['run_count']}, errored {step_id in errored}"
+        for step_id in sorted(set().union(*pending_at_kill))
+        if clean[step_id]["status"] == StepStatus.VERIFIED
+        and (killed[step_id]["run_count"] > MAX_RUNS_AFTER_ONE_KILL or step_id in errored)
+    ]
+    assert collateral == [], "a kill left damage the resume had to repair"

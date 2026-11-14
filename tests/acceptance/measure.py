@@ -30,7 +30,7 @@ def main() -> None:
         print(f"{'hire':10} {'machine':8} {'elapsed':>10} {'errors':>6} {'memory':>6} {'llm':>4}  run_id")
         for hire in hires_by_first_run(db):
             row = numbers(db, hire)
-            record = db.hires.find_one({"name": hire}) or {}
+            record = db.hires.find_one({"_id": hire}) or {}
             print(
                 f"{hire:10} {record.get('machine', '?'):8} {duration(row.elapsed_s):>10} {row.errors:>6} "
                 f"{row.fixes_from_memory:>6} {row.llm_calls:>4}  {row.run_id}"

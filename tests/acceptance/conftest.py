@@ -1,4 +1,4 @@
-"""Session fixtures: a dropped `dayone_acceptance` database, the Gitea API, and real onboarding runs."""
+"""Session fixtures: `dayone_acceptance` with empty memory, the Gitea API, and real onboarding runs."""
 
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ from dayone.contracts import REPO, Machine
 from harness import Agent, container_exists, run_cli
 
 TICKED_ITEM = "- [x]"
+DEFAULT_HIRES = {"first": "ada", "second": "grace", "killed": "barbara", "alpine": "ken", "drift": "linus"}
 
 
 @dataclass(frozen=True)
@@ -28,13 +29,28 @@ class Run:
 
 
 @pytest.fixture(scope="session")
+def hires(request: pytest.FixtureRequest) -> dict[str, str]:
+    """Role -> Gitea hire. `--hire NAME` maps every role to NAME; `--role ROLE=NAME` then overrides one role."""
+    only = request.config.getoption("--hire")
+    roles = dict.fromkeys(DEFAULT_HIRES, only) if only else dict(DEFAULT_HIRES)
+    for assignment in request.config.getoption("--role"):
+        role, _, name = assignment.partition("=")
+        if role not in DEFAULT_HIRES or not name:
+            raise pytest.UsageError(f"--role {assignment!r}: expected ROLE=HIRE with ROLE in {sorted(DEFAULT_HIRES)}")
+        roles[role] = name
+    return roles
+
+
+@pytest.fixture(scope="session")
 def db(acceptance_db_name: str) -> Iterator[Database]:
     configured = settings().mongodb_db
-    assert configured == acceptance_db_name, f"refusing to drop {configured!r}; run with --acceptance"
+    assert configured == acceptance_db_name, f"refusing to empty {configured!r}; run with --acceptance"
     client: MongoClient = MongoClient(settings().mongodb_uri)
-    client.drop_database(acceptance_db_name)
-    print(f"dropped Atlas database {acceptance_db_name}")
-    yield client[acceptance_db_name]
+    db = client[acceptance_db_name]
+    # Memory starts empty. Hires, steps and events are left to `dayone reset NAME`, which needs a hire's
+    # doc to find its container. (The hackathon user may not dropDatabase; this also keeps the vector index.)
+    print(f"emptied {acceptance_db_name}.experiences: {db.experiences.delete_many({}).deleted_count} documents")
+    yield db
     client.close()
 
 

@@ -6,13 +6,26 @@ import pytest
 
 ACCEPTANCE_DB = "dayone_acceptance"
 ACCEPTANCE_OPTION = "--acceptance"
+HIRE_OPTION = "--hire"
+ROLE_OPTION = "--role"
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption(
         ACCEPTANCE_OPTION,
         action="store_true",
-        help=f"run tests/acceptance against the real system (minutes per test; drops Atlas db {ACCEPTANCE_DB})",
+        help=f"run tests/acceptance against the real system (minutes per test; empties memory in Atlas db {ACCEPTANCE_DB})",
+    )
+    parser.addoption(
+        HIRE_OPTION,
+        help="run every acceptance role as this one hire (tests that need two different hires skip)",
+    )
+    parser.addoption(
+        ROLE_OPTION,
+        action="append",
+        default=[],
+        metavar="ROLE=HIRE",
+        help="give one acceptance role (first, second, killed, alpine, drift) to a hire; repeatable",
     )
 
 
