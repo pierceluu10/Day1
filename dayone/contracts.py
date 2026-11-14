@@ -166,9 +166,16 @@ WELCOME_CHECKLIST: dict[str, str] = {
     "t_init_db": "Initialise the local database",
     "t_run_tests": "Run the test suite and see it pass",
 }
-# The engine ticks each of these as its step passes, so the issue fills in alongside the terminal. b_checklist
-# ticks the rest: the test-suite item, whose step runs just before it, so its check still fails before its run.
-ENGINE_TICKED_ITEMS = frozenset(WELCOME_CHECKLIST) - {"t_run_tests"}
+# Step that passed -> the Welcome item the engine ticks right then, so the issue fills in alongside the terminal.
+# The SSH-key item waits for b_open_welcome, so opening the issue stays that step's own action. b_checklist ticks
+# the test-suite item, whose step runs just before it, so its check still fails before its run.
+ENGINE_TICKS: dict[str, str] = {
+    "b_open_welcome": "b_add_ssh_key",
+    "t_clone": "t_clone",
+    "t_install_deps": "t_install_deps",
+    "t_settings": "t_settings",
+    "t_init_db": "t_init_db",
+}
 
 # --- Memory -------------------------------------------------------------------
 

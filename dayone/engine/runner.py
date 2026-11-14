@@ -25,7 +25,7 @@ from dayone.browser.session import ChecklistSaveFailed, LocatorNotFound
 from dayone.config import settings
 from dayone.contracts import (
     DONE_STATUSES,
-    ENGINE_TICKED_ITEMS,
+    ENGINE_TICKS,
     REPO,
     REPO_BRANCH,
     REPO_DIR,
@@ -442,13 +442,13 @@ class Run:
     ) -> None:
         self.store.mark_done(self.hire.name, step.id, status, check, resolution)
         self._report(step, status, check, reconciled)
-        if step.id in ENGINE_TICKED_ITEMS and not reconciled:
+        if step.id in ENGINE_TICKS and not reconciled:
             self._tick(step)
 
     def _tick(self, step: Step) -> None:
         # Best effort: b_checklist ticks anything left and is the check of record for the Welcome issue.
         try:
-            self.parts.browser.tick_item(WELCOME_CHECKLIST[step.id], step.id)
+            self.parts.browser.tick_item(WELCOME_CHECKLIST[ENGINE_TICKS[step.id]], step.id)
         except (PlaywrightError, LocatorNotFound, ChecklistSaveFailed):
             log.warning("could not tick the Welcome item for %s; b_checklist will", step.id, exc_info=True)
 
