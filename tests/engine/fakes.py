@@ -68,13 +68,15 @@ def marker_step(workdir: Path, step_id: str) -> Step:
 class FakeExecutor:
     def __init__(self) -> None:
         self.commands: list[tuple[str, str | None]] = []
+        self.results: dict[str, tuple[int, str]] = {}  # command -> (exit code, output); default success, silent
 
     def ensure_container(self) -> None:
         pass
 
     def exec(self, command: str, timeout_s: float, workdir: str | None = None) -> ExecResult:
         self.commands.append((command, workdir))
-        return ExecResult(command=command, exit_code=0, output="", duration_s=0.0)
+        exit_code, output = self.results.get(command, (0, ""))
+        return ExecResult(command=command, exit_code=exit_code, output=output, duration_s=0.0)
 
     def facts(self) -> MachineFacts:
         return MachineFacts(os_family="ubuntu", os_version="22.04", package_manager="apt")

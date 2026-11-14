@@ -22,6 +22,7 @@ from dayone.contracts import (
     StepStatus,
 )
 from dayone.engine.runner import drive
+from dayone.memory.experience import FIX_OUTPUT
 from dayone.store.atlas import AtlasStore
 from dayone.store.events import AtlasEventBus
 from tests.engine.fakes import FakeBrowser, FakeExecutor, FakeGitea, FakeMemory, fake_fingerprint, parts_opener
@@ -160,3 +161,41 @@ def test_exception_from_check_is_a_failed_check(store: AtlasStore, tmp_path: Pat
     doc = store.db["steps"].find_one({"hire": "flaky", "step_id": "t_flaky"})
     assert doc["status"] == StepStatus.VERIFIED and doc["run_count"] == 1
     assert doc["check_ever_failed"], "the raising check counts as the failure before the pass"
+
+
+INSPECT = "grep -n DATABASE_URL settings.py"
+INSPECT_OUTPUT = "12:DATABASE_URL = os.environ['DATABASE_URL']"
+BROKEN = "python -m acme_api.init_db"
+BROKEN_OUTPUT = "sqlite3.OperationalError: unable to open database file"
+
+
+def test_try_fix_reports_each_fix_commands_output_on_both_returns(store: AtlasStore, tmp_path: Path) -> None:
+    executor = FakeExecutor()
+    executor.results = {INSPECT: (0, INSPECT_OUTPUT), BROKEN: (1, BROKEN_OUTPUT)}
+    seen: list[CheckResult] = []
+
+    class RecordingMemory(FakeMemory):
+        def resolve(self, failure, try_fix):
+            return super().resolve(failure, lambda proposal: seen.append(try_fix(proposal)) or seen[-1])
+
+    memory = RecordingMemory(
+        fixes=[
+            FixProposal(commands=(INSPECT, BROKEN, "never-run"), source=FixSource.REASONING, rationale="inspect"),
+            FixProposal(commands=(INSPECT, FIX_COMMAND), source=FixSource.REASONING, rationale="fix"),
+        ]
+    )
+    opener = parts_opener(store, [needs_fix_step(tmp_path, executor)], FakeGitea(), memory, FakeBrowser(), executor)
+    assert drive(store, "inspector", Machine.UBUNTU, False, opener)
+
+    failed, passed = seen
+    print("failed detail:", failed.detail, "\npassed detail:", passed.detail)
+    assert not failed.ok and failed.error_text == BROKEN_OUTPUT
+    assert failed.detail[FIX_OUTPUT] == [
+        {"command": INSPECT, "exit_code": 0, "output": INSPECT_OUTPUT},
+        {"command": BROKEN, "exit_code": 1, "output": BROKEN_OUTPUT},
+    ], "stops at the first failing command and reports every command it ran"
+    assert passed.ok and passed.evidence == "pip check: no broken requirements"
+    assert passed.detail[FIX_OUTPUT] == [
+        {"command": INSPECT, "exit_code": 0, "output": INSPECT_OUTPUT},
+        {"command": FIX_COMMAND, "exit_code": 0, "output": ""},
+    ]
