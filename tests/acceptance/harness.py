@@ -146,7 +146,8 @@ class Agent:
         print(f"kill -9 `dayone {' '.join(self.args)}` pid {self.process.pid}")
 
     def output_tail(self) -> str:
-        self._log_file.flush()
+        if not self._log_file.closed:
+            self._log_file.flush()
         return tail(self.log.read_text())
 
 
