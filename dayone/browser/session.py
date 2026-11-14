@@ -26,6 +26,8 @@ LOCATOR_TIMEOUT_MS = 2000
 REASONING_ATTEMPTS = 3
 REASONING_MAX_TOKENS = 200
 SNAPSHOT_MAX_CHARS = 15000
+IS_CHECKABLE_JS = """e => (e instanceof HTMLInputElement && ['checkbox', 'radio'].includes(e.type))
+    || ['checkbox', 'radio'].includes(e.getAttribute('role'))"""
 ISSUE_SAVE_SUFFIX = "/content"  # POST /{repo}/issues/{n}/content, sent by Gitea's task-list JS
 
 REASONING_SYSTEM = (
@@ -60,6 +62,8 @@ class PlaywrightSession:
         self._playwright: Playwright | None = None
         self._context: BrowserContext | None = None
         self._page: Page | None = None
+        self._welcome_opened = False  # by b_open_welcome's run in this browser
+        self._deferred_ticks: list[str] = []
 
     # --- lifecycle ------------------------------------------------------------
 
@@ -105,56 +109,74 @@ class PlaywrightSession:
     # --- acting through locator memory ------------------------------------------
 
     def act(self, goal: str, action: Action, value: str = "", step_id: str | None = None) -> Locator:
-        """Find `goal` from memory (green), else show "This moved." (red) and reason over the page (amber)."""
+        """Act on `goal` from memory, then the hand-found seed (green); every hint that does not resolve to one
+        element fit for `action` shows "This moved." (red); with none left, reason over the page (amber)."""
         summary = self.page_summary()
-        hint = self.memory.find_locator(goal, summary) or self._seed(goal, summary)
-        if hint is not None:
-            target = self._resolve(hint.locator)
-            if target is not None:
-                bbox = self._mark(target, "memory", hint.source_hire)
-                self._emit(step_id, goal, "memory", hint.locator, source_hire=hint.source_hire)
-                self._perform(target, action, value)
-                if hint.source_hire == SEED_SOURCE:
-                    self._save(goal, hint.locator, bbox, summary)
-                return target
-            self._mark_moved(hint)
-            self._emit(step_id, goal, "moved", hint.locator, source_hire=hint.source_hire)
-        locator, target = self._reason(goal, step_id)
+        for hint in self._hints(goal, summary):
+            target = self._resolve(hint.locator, action)
+            if target is None:
+                self._mark_moved(hint)
+                self._emit(step_id, goal, "moved", hint.locator, source_hire=hint.source_hire)
+                continue
+            bbox = self._mark(target, "memory", hint.source_hire)
+            self._emit(step_id, goal, "memory", hint.locator, source_hire=hint.source_hire)
+            self._perform(target, action, value)
+            if hint.source_hire == SEED_SOURCE:
+                self._save(goal, hint.locator, bbox, summary)
+            return target
+        locator, target = self._reason(goal, action, step_id)
         bbox = self._mark(target, "reasoning", "new locator")
         self._emit(step_id, goal, "reasoning", locator)
         self._perform(target, action, value)
         self._save(goal, locator, bbox, summary)
         return target
 
-    def _seed(self, goal: str, summary: str) -> LocatorHint | None:
-        locator = SEED_LOCATORS.get(goal)
-        if locator is None:
-            return None
-        return LocatorHint(goal, locator, None, summary, SEED_SOURCE, None)
+    def _hints(self, goal: str, summary: str) -> list[LocatorHint]:
+        remembered = self.memory.find_locator(goal, summary)
+        # A semantic hit for another goal on the same page (the username field for "remember me") is a
+        # different element, never this one: only a locator saved for this exact goal is trusted.
+        hints = [remembered] if remembered is not None and remembered.goal == goal else []
+        seed = SEED_LOCATORS.get(goal)
+        if seed is not None and all(hint.locator != seed for hint in hints):
+            hints.append(LocatorHint(goal, seed, None, summary, SEED_SOURCE, None))
+        return hints
 
-    def _resolve(self, locator: str) -> Locator | None:
+    def _resolve(self, locator: str, action: Action) -> Locator | None:
+        """The locator's element, if there is exactly one, it is visible, and `action` can be done to it."""
         try:
             target = self.page.locator(locator)
             target.first.wait_for(state="visible", timeout=LOCATOR_TIMEOUT_MS)
             if target.count() != 1:
                 return None
-        except PlaywrightError:  # bad selector syntax, or nothing visible in time
+            if action is Action.FILL:
+                fits = target.is_editable()
+            elif action is Action.CHECK:
+                fits = target.evaluate(IS_CHECKABLE_JS)
+            else:
+                fits = target.is_enabled()
+        except PlaywrightError:  # bad selector syntax, nothing visible in time, or it vanished meanwhile
             return None
-        return target
+        return target if fits else None
 
-    def _reason(self, goal: str, step_id: str | None) -> tuple[str, Locator]:
+    def _reason(self, goal: str, action: Action, step_id: str | None) -> tuple[str, Locator]:
         self.events.emit(EventType.REASONING_STARTED, step_id=step_id, goal=goal)
         snapshot = self.page.locator("body").aria_snapshot()[:SNAPSHOT_MAX_CHARS]
-        feedback = ""
+        rejected: list[str] = []
         for _ in range(REASONING_ATTEMPTS):
-            prompt = f"Goal: {goal}\nPage: {self.page_summary()}\n\nARIA snapshot:\n{snapshot}\n{feedback}"
-            reply = self.llm.complete(REASONING_SYSTEM, prompt, REASONING_MAX_TOKENS)
-            locator = _selector_line(reply)
-            target = self._resolve(locator)
+            feedback = (
+                f"\nThese answers did not match exactly one visible element you can {action}: {rejected}. Try another."
+                if rejected
+                else ""
+            )
+            prompt = (
+                f"Goal: {goal} (to {action} it)\nPage: {self.page_summary()}\n\nARIA snapshot:\n{snapshot}\n{feedback}"
+            )
+            locator = _selector_line(self.llm.complete(REASONING_SYSTEM, prompt, REASONING_MAX_TOKENS))
+            target = self._resolve(locator, action)
             if target is not None:
                 return locator, target
-            feedback = f"\nYour previous answer {locator!r} did not match exactly one visible element. Try another."
-        raise LocatorNotFound(f"no locator for {goal!r} on {self.page_summary()} after {REASONING_ATTEMPTS} tries")
+            rejected.append(locator)
+        raise LocatorNotFound(f"no locator for {goal!r} on {self.page_summary()}; rejected {rejected}")
 
     def _save(self, goal: str, locator: str, bbox: BBox | None, summary: str) -> None:
         hint = LocatorHint(goal, locator, bbox, summary, self.hire.name, None)
@@ -196,23 +218,37 @@ class PlaywrightSession:
     # --- Welcome issue ----------------------------------------------------------
 
     def open_welcome(self, step_id: str | None = None) -> None:
-        """Navigate like a person: search the repo's issues for the hire's Welcome issue and click it."""
+        """Navigate like a person: search the repo's issues for the hire's Welcome issue and click it.
+        Ticks requested before the hire opened the issue are done now, in view."""
         title = WELCOME_ISSUE_TITLE.format(hire=self.hire.name)
-        if self._page is not None and self.page.title().startswith(title):
-            return
-        self.goto(f"/{REPO}/issues?q={quote(title)}")
-        self.act(ISSUES_OPEN_WELCOME, Action.CLICK, step_id=step_id)
-        self.page.wait_for_load_state()
+        if not (self._page is not None and self.page.title().startswith(title)):
+            self.goto(f"/{REPO}/issues?q={quote(title)}")
+            self.act(ISSUES_OPEN_WELCOME, Action.CLICK, step_id=step_id)
+            self.page.wait_for_load_state()
+        self._welcome_opened = True
+        deferred, self._deferred_ticks = self._deferred_ticks, []
+        for item in deferred:
+            self._tick_best_effort(item, step_id)
 
     def tick_checklist(self, item: str) -> None:
-        """Best-effort and idempotent: b_checklist's API check, not this tick, is what verifies anything."""
+        """Best-effort and idempotent: b_checklist's API check, not this tick, is what verifies anything.
+        Until b_open_welcome has opened the issue in this browser the tick waits, so ticking never opens
+        the issue on the hire's behalf (which would let b_open_welcome's check pass without its run)."""
+        if not self._welcome_opened:
+            if item not in self._deferred_ticks:
+                self._deferred_ticks.append(item)
+            return
+        self._tick_best_effort(item, None)
+
+    def _tick_best_effort(self, item: str, step_id: str | None) -> None:
         try:
-            self.tick_item(item)
+            self.tick_item(item, step_id)
         except (PlaywrightError, LocatorNotFound, ChecklistSaveFailed) as error:
             log.warning("could not tick %r: %s", item, error)
 
     def tick_item(self, item: str, step_id: str | None = None) -> None:
-        self.open_welcome(step_id)
+        if not self.page.title().startswith(WELCOME_ISSUE_TITLE.format(hire=self.hire.name)):
+            self.open_welcome(step_id)
         # The issue's raw markdown is in the page; an already-ticked item fires no save to wait for.
         if is_ticked(self.page.locator(".raw-content").first.text_content() or "", item):
             return

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import re
-
 from dayone.browser.locators import (
     KEYS_CONTENT,
     KEYS_OPEN_FORM,
@@ -25,13 +23,14 @@ from dayone.contracts import (
     StepContext,
     StepKind,
 )
+from dayone.gitea import GiteaClient
 from dayone.terminal.ssh import ssh_auth_ok
 
 PUBLIC_KEY_PATH = "~/.ssh/id_ed25519.pub"
 SIGNED_IN_MARKER = "Signed in as <strong>{hire}</strong>"
 HTTP_OK = 200
 SIGNED_IN_ONLY_PATH = "/user/settings"
-ISSUE_URL = re.compile(rf"/{re.escape(REPO)}/issues/(\d+)(?:[?#].*)?$")
+NOTIFICATION_LIMIT = 50
 
 
 def _browser(ctx: StepContext) -> PlaywrightSession:
@@ -119,16 +118,25 @@ def open_welcome_run(ctx: StepContext) -> RunResult:
 
 
 def open_welcome_check(ctx: StepContext) -> CheckResult:
-    """What the hire's page shows must be the issue the API says is theirs."""
+    """Gitea marks the hire's notification for an issue read when the hire views that issue: server-side
+    proof the hire opened it, read through the API as the hire (admin sudo), not from the page."""
     issue = ctx.gitea.welcome_issue(ctx.hire.name)
-    page = _browser(ctx).page
-    match = ISSUE_URL.search(page.url)
-    heading = page.locator("h1").first.inner_text() if match else ""
-    detail = {"page_url": page.url, "page_heading": heading, "api_number": issue["number"], "api_title": issue["title"]}
-    if match and int(match.group(1)) == issue["number"] and issue["title"] in heading:
-        return CheckResult(True, f"page shows #{issue['number']} {issue['title']!r} = API Welcome issue", detail)
-    error = f"page {page.url} ({heading!r}) is not the API's Welcome issue #{issue['number']}"
-    return CheckResult(False, error, detail, error_text=error)
+    gitea: GiteaClient = ctx.gitea  # type: ignore[assignment]  # sudo reads need the concrete client
+    threads = gitea.request(
+        "GET",
+        "/notifications",
+        params={"all": "true", "subject-type": "issue", "limit": NOTIFICATION_LIMIT, "sudo": ctx.hire.name},
+    )
+    issue_path = f"/{REPO}/issues/{issue['number']}"
+    thread = next((t for t in threads if t["subject"]["html_url"].endswith(issue_path)), None)
+    detail = {"api_number": issue["number"], "thread_id": thread and thread["id"], "unread": thread and thread["unread"]}
+    if thread is None:
+        error = f"no notification for Welcome issue #{issue['number']} in {ctx.hire.name}'s inbox (is it assigned?)"
+        return CheckResult(False, error, detail, error_text=error)
+    if thread["unread"]:
+        error = f"Welcome issue #{issue['number']} is still unread for {ctx.hire.name}"
+        return CheckResult(False, error, detail, error_text=error)
+    return CheckResult(True, f"API: {ctx.hire.name} has read Welcome issue #{issue['number']} {issue['title']!r}", detail)
 
 
 # --- b_checklist ----------------------------------------------------------------
