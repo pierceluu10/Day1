@@ -26,14 +26,24 @@ VERSION = re.compile(r"\d+(?:\.\d+)+\w*")
 PACKAGE_MANAGERS = {"alpine": "apk", "ubuntu": "apt", "debian": "apt"}
 FACT_MARKER = "@@dayone-fact "
 ERROR_TAIL_LINES = 40
+ERROR_LINE_LIMIT = 20
+# Compiler and pip error lines, wherever they sit in the line ("Modules/common.h:15:10: fatal error: lber.h: ...").
+ERROR_LINE = re.compile(r"\b(?:fatal error|error):", re.I)
 PIDFILE_PREFIX = "/tmp/dayone-exec-"
 ORPHAN_PIDFILES = f"{PIDFILE_PREFIX}*.pid"
 
 
 def error_text(result: ExecResult, workdir: str | None = None, message: str = "") -> str:
-    """What a failing check hands memory: the exact command first (fixes must reproduce its context), then output."""
+    """What a failing check hands memory: the exact command first (fixes must reproduce its context), then the
+    error lines from anywhere in the output (long build logs push the cause out of the tail), then the tail."""
     command = f"$ cd {workdir} && {result.command}" if workdir else f"$ {result.command}"
-    output = "\n".join(result.output.strip().splitlines()[-ERROR_TAIL_LINES:])
+    lines = result.output.strip().splitlines()
+    tail = lines[-ERROR_TAIL_LINES:]
+    earlier: list[str] = []
+    for line in lines[: len(lines) - len(tail)]:
+        if ERROR_LINE.search(line) and line not in earlier and line not in tail:
+            earlier.append(line)
+    output = "\n".join([*earlier[:ERROR_LINE_LIMIT], *tail])
     return "\n".join(part for part in (command, output, message) if part)
 
 
