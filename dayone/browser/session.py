@@ -11,7 +11,7 @@ from playwright.sync_api import Error as PlaywrightError
 
 from dayone.browser.locators import ISSUES_OPEN_WELCOME, SEED_LOCATORS, SEED_SOURCE, checklist_goal
 from dayone.config import ROOT, STATE_DIR, Settings
-from dayone.contracts import LLM, REPO, WELCOME_ISSUE_TITLE, EventBus, EventType, Hire, LocatorHint, Memory
+from dayone.contracts import LLM, REPO, WELCOME_CHECKLIST, WELCOME_ISSUE_TITLE, EventBus, EventType, Hire, LocatorHint, Memory
 
 log = logging.getLogger(__name__)
 BBox = tuple[float, float, float, float]
@@ -28,6 +28,7 @@ REASONING_MAX_TOKENS = 200
 SNAPSHOT_MAX_CHARS = 15000
 IS_CHECKABLE_JS = """e => (e instanceof HTMLInputElement && ['checkbox', 'radio'].includes(e.type))
     || ['checkbox', 'radio'].includes(e.getAttribute('role'))"""
+CHECKLIST_STEPS = {item: step_id for step_id, item in WELCOME_CHECKLIST.items()}
 ISSUE_SAVE_SUFFIX = "/content"  # POST /{repo}/issues/{n}/content, sent by Gitea's task-list JS
 
 REASONING_SYSTEM = (
@@ -108,7 +109,7 @@ class PlaywrightSession:
 
     # --- acting through locator memory ------------------------------------------
 
-    def act(self, goal: str, action: Action, value: str = "", step_id: str | None = None) -> Locator:
+    def act(self, goal: str, action: Action, step_id: str, value: str = "") -> Locator:
         """Act on `goal` from memory, then the hand-found seed (green); every hint that does not resolve to one
         element fit for `action` shows "This moved." (red); with none left, reason over the page (amber)."""
         summary = self.page_summary()
@@ -158,7 +159,7 @@ class PlaywrightSession:
             return None
         return target if fits else None
 
-    def _reason(self, goal: str, action: Action, step_id: str | None) -> tuple[str, Locator]:
+    def _reason(self, goal: str, action: Action, step_id: str) -> tuple[str, Locator]:
         self.events.emit(EventType.REASONING_STARTED, step_id=step_id, goal=goal)
         snapshot = self.page.locator("body").aria_snapshot()[:SNAPSHOT_MAX_CHARS]
         rejected: list[str] = []
@@ -212,12 +213,12 @@ class PlaywrightSession:
         self.page.evaluate("o => window.__dayone.mark(o)", {"mode": "moved", "bbox": hint.bbox})
         self.page.wait_for_timeout(MOVED_HOLD_MS)
 
-    def _emit(self, step_id: str | None, goal: str, mode: str, locator: str, **extra: object) -> None:
+    def _emit(self, step_id: str, goal: str, mode: str, locator: str, **extra: object) -> None:
         self.events.emit(EventType.LOCATOR, step_id=step_id, goal=goal, mode=mode, locator=locator, **extra)
 
     # --- Welcome issue ----------------------------------------------------------
 
-    def open_welcome(self, step_id: str | None = None) -> None:
+    def open_welcome(self, step_id: str) -> None:
         """Navigate like a person: search the repo's issues for the hire's Welcome issue and click it.
         Ticks requested before the hire opened the issue are done now, in view."""
         title = WELCOME_ISSUE_TITLE.format(hire=self.hire.name)
@@ -228,25 +229,26 @@ class PlaywrightSession:
         self._welcome_opened = True
         deferred, self._deferred_ticks = self._deferred_ticks, []
         for item in deferred:
-            self._tick_best_effort(item, step_id)
+            self._tick_best_effort(item, CHECKLIST_STEPS[item])
 
     def tick_checklist(self, item: str) -> None:
         """Best-effort and idempotent: b_checklist's API check, not this tick, is what verifies anything.
+        Its browser actions are attributed to the step whose checklist item it is.
         Until b_open_welcome has opened the issue in this browser the tick waits, so ticking never opens
         the issue on the hire's behalf (which would let b_open_welcome's check pass without its run)."""
         if not self._welcome_opened:
             if item not in self._deferred_ticks:
                 self._deferred_ticks.append(item)
             return
-        self._tick_best_effort(item, None)
+        self._tick_best_effort(item, CHECKLIST_STEPS[item])
 
-    def _tick_best_effort(self, item: str, step_id: str | None) -> None:
+    def _tick_best_effort(self, item: str, step_id: str) -> None:
         try:
             self.tick_item(item, step_id)
         except (PlaywrightError, LocatorNotFound, ChecklistSaveFailed) as error:
             log.warning("could not tick %r: %s", item, error)
 
-    def tick_item(self, item: str, step_id: str | None = None) -> None:
+    def tick_item(self, item: str, step_id: str) -> None:
         if not self.page.title().startswith(WELCOME_ISSUE_TITLE.format(hire=self.hire.name)):
             self.open_welcome(step_id)
         # The issue's raw markdown is in the page; an already-ticked item fires no save to wait for.
