@@ -43,6 +43,7 @@ class Settings:
     gitea_hire_password: str
     exec_timeout_s: float
     api_port: int
+    browser_headless: bool  # false for the demo; true in CI-style tests
 
 
 @cache
@@ -65,4 +66,5 @@ def settings() -> Settings:
         gitea_hire_password=_required("GITEA_HIRE_PASSWORD"),
         exec_timeout_s=float(_required("EXEC_TIMEOUT_SECONDS")),
         api_port=int(_required("API_PORT")),
+        browser_headless=_required("BROWSER_HEADLESS").lower() == "true",
     )

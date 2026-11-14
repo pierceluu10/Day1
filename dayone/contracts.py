@@ -157,6 +157,17 @@ STEP_IDS: tuple[str, ...] = (
 )
 
 
+# Task-list items in each hire's Welcome issue (seeded by infra, ticked by the browser, in this order).
+WELCOME_ISSUE_TITLE = "Welcome to Acme, {hire}!"
+WELCOME_CHECKLIST: dict[str, str] = {
+    "b_add_ssh_key": "Add your laptop's SSH key to your Gitea account",
+    "t_clone": "Clone acme/acme-api",
+    "t_install_deps": "Install the project dependencies",
+    "t_settings": "Configure your local settings",
+    "t_init_db": "Initialise the local database",
+    "t_run_tests": "Run the test suite and see it pass",
+}
+
 # --- Memory -------------------------------------------------------------------
 
 
