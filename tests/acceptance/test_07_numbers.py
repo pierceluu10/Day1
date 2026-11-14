@@ -1,9 +1,13 @@
-"""Acceptance 7: every number the API serves matches a direct Atlas query (atlas.numbers / the steps collection)."""
+"""Acceptance 7: every number the API serves matches a direct Atlas query (atlas.numbers / the steps collection).
+
+Deliberately recomputed here, not through dayone.api.queries: the oracle must not share code with what it checks.
+"""
 
 from __future__ import annotations
 
 import socket
 import time
+from datetime import datetime
 from collections.abc import Iterator
 from typing import Any
 
@@ -22,7 +26,6 @@ COMPARE_PATH = "/api/compare/{hire}"
 STEPS_PATH = "/api/hires/{hire}/steps"
 NUMBER_FIELDS = ("elapsed_s", "errors", "fixes_from_memory", "llm_calls")
 ELAPSED_TOLERANCE_S = 1.0  # the API may round elapsed time to whole seconds
-UNCOMPARED_STEP_FIELDS = frozenset({"_id", "updated_at"})
 SERVER_START_TIMEOUT_S = 30.0
 SERVER_POLL_S = 0.5
 HTTP_TIMEOUT_S = 10.0
@@ -112,7 +115,9 @@ def test_api_numbers_match_atlas(onboard, db, api):
         for step in served:
             doc = atlas_steps[step["step_id"]]
             assert {"status", "evidence"} <= step.keys(), step
-            for key in step.keys() - UNCOMPARED_STEP_FIELDS:
+            for key in step.keys():
                 assert key in doc or not isinstance(step[key], int | float), f"{hire}/{step['step_id']}.{key} is not an Atlas field"
-                if key in doc:
+                if key in doc and isinstance(doc[key], datetime):
+                    assert datetime.fromisoformat(step[key]).replace(tzinfo=None) == doc[key], f"{hire}/{step['step_id']}.{key}"
+                elif key in doc:
                     assert step[key] == doc[key], f"{hire}/{step['step_id']}.{key}: API {step[key]!r} vs Atlas {doc[key]!r}"
