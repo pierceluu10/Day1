@@ -14,7 +14,6 @@ from dayone.steps.terminal_steps import TERMINAL_STEPS
 from dayone.terminal.ssh import ssh_auth_ok
 from dayone.terminal.fingerprint import fingerprint
 
-DEV_HIRE = "grace"
 
 ERRORS_DIR = Path(__file__).parent / "errors"
 FIX_TIMEOUT_S = 900.0
@@ -54,17 +53,17 @@ def _show(machine: Machine, step_id: str, label: str, result: CheckResult) -> No
         print(f"--- error_text (fingerprint {fingerprint(result.error_text)}) ---\n{result.error_text}\n---")
 
 
-def _add_dev_key(gitea, public_key: str, fingerprint_: str) -> None:
-    if any(key["fingerprint"] == fingerprint_ for key in gitea.user_keys(DEV_HIRE)):
+def _add_dev_key(gitea, dev_hire: str, public_key: str, fingerprint_: str) -> None:
+    if any(key["fingerprint"] == fingerprint_ for key in gitea.user_keys(dev_hire)):
         return
-    for key in gitea.user_keys(DEV_HIRE):
+    for key in gitea.user_keys(dev_hire):
         if key["title"] == DEV_KEY_TITLE:
-            gitea.request("DELETE", f"/admin/users/{DEV_HIRE}/keys/{key['id']}")
-    gitea.request("POST", f"/admin/users/{DEV_HIRE}/keys", json={"title": DEV_KEY_TITLE, "key": public_key})
+            gitea.request("DELETE", f"/admin/users/{dev_hire}/keys/{key['id']}")
+    gitea.request("POST", f"/admin/users/{dev_hire}/keys", json={"title": DEV_KEY_TITLE, "key": public_key})
 
 
 @pytest.mark.parametrize("machine", [Machine.UBUNTU, Machine.ALPINE, Machine.DEBIAN])
-def test_fresh_machine_reaches_passing_tests(machine: Machine, gitea, make_executor, make_context) -> None:
+def test_fresh_machine_reaches_passing_tests(machine: Machine, gitea, dev_hire, make_executor, make_context) -> None:
     executor = make_executor(machine)
     executor.remove_container()
     executor.ensure_container()
@@ -100,7 +99,7 @@ def test_fresh_machine_reaches_passing_tests(machine: Machine, gitea, make_execu
         if step_id == "t_ssh_keygen":
             denied = ssh_auth_ok(ctx)
             _show(machine, step_id, "ssh -T before key is registered", denied)
-            _add_dev_key(gitea, after.detail["public_key"], after.detail["fingerprint"])
+            _add_dev_key(gitea, dev_hire, after.detail["public_key"], after.detail["fingerprint"])
             authed = ssh_auth_ok(ctx)
             _show(machine, step_id, "ssh -T after key is registered", authed)
             assert authed.ok and not denied.ok

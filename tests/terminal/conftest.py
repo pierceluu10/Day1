@@ -8,7 +8,7 @@ from dayone.config import settings
 from dayone.contracts import HIRES, EventType, Hire, Machine, StepContext, container_name, idempotency_key
 from dayone.terminal.docker import DockerExecutor
 
-DEV_HIRE = "grace"  # Gitea account whose key and SSH access the live tests use
+DEV_HIRE = "dev3"  # Gitea user seeded for session 3 only; never a hire, so live tests share nothing with integration
 # The laptop is never a hire container: those belong to integration runs (concurrent apt hits the dpkg lock).
 DEV_CONTAINER = "dayone-dev3"
 HIRE_CONTAINERS = frozenset(container_name(hire) for hire in HIRES)
@@ -52,6 +52,11 @@ def gitea(docker):
     client = GiteaClient(settings())
     yield client
     client.close()
+
+
+@pytest.fixture
+def dev_hire() -> str:
+    return DEV_HIRE
 
 
 @pytest.fixture
