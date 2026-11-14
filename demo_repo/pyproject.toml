@@ -3,7 +3,12 @@ name = "acme-api"
 version = "1.4.0"
 description = "Acme's users service"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+  "fastapi==0.162.5",
+  "httpx==0.28.1",
+  "psycopg2==2.9.10",
+  "pytest==8.3.4",
+]
 
 [build-system]
 requires = ["setuptools>=69"]

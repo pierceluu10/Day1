@@ -37,7 +37,7 @@ Integration branch: `claude/day-one-mongodb-agent-6cc839` (orchestrator session)
 | Resource | Rule |
 |---|---|
 | Gitea `http://localhost:3000`, SSH `localhost:2222`, container `gitea` on network `dayone-net` | Session 1 creates and seeds it. Others never reset it; ask session 1 (or the orchestrator) for a reset. |
-| Gitea hires `ada grace linus barbara ken` | Dev testing: session 3 uses `grace`, session 4 uses `linus`. `ada`, `barbara`, `ken` are kept clean for integration and the demo. |
+| Gitea hires `ada grace linus barbara ken` | All five belong to integration and the demo (13:40). Dev tests use their own non-hire containers (e.g. `dayone-dev3`), never `dayone-<hire>`. |
 | Hire containers `dayone-<hire>` | Only for the hire you own in dev. |
 | Atlas database | Each session sets `MONGODB_DB=dayone_dev_<session number>` in its own `.env` copy. `dayone` is integration only. |
 | Ports | 3000 and 2222 Gitea, 8000 the page/API. |
@@ -55,4 +55,16 @@ Integration branch: `claude/day-one-mongodb-agent-6cc839` (orchestrator session)
 
 ## In progress / blocked / next
 
-Updated by the orchestrator after each merge.
+Updated 13:57.
+
+**Ada (hire 1, ubuntu)**: green 13:23. 9m 14s first start to finish (includes a crash and resume), 5 errors, 0 from memory, 4 fixed by reasoning.
+
+**Grace (hire 2, debian)**: clean run green 13:55. 6m 21s, 4 errors, 4 fixed from memory (all adapted from ada's ubuntu fixes: one adapt LLM call each, 0 reasoning), tests 13/13. An earlier grace run was discarded: session 3's live tests ran apt in dayone-grace at the same time, and memory replayed the Ubuntu-only PPA on Debian (fixed in 3616578).
+
+Fixed since 13:25: memory adapts across OSes, not just across package managers (3616578); reset removes the container by name (c87bacd); dev tests use Gitea users dev3/dev4 and their own containers (6500679, 0a8397b, 61c3b9e).
+
+**Linus (hire 3, ubuntu)**: green 13:59. 2m 55s, 4 errors, 4 fixed from memory (t_runtime same-machine semantic, t_init_db exact: 0 LLM calls; t_system_package and t_settings picked grace's debian experience and adapted it back: 2 needless LLM calls, fix with session 5). Tests 13/13 at 2955521 (QA's drift commit moved shared main; to restore before 15:15).
+
+Open: engine never calls close_loop(), so no README issue yet (session 2); drift during a crash not reported (session 2); orphaned in-container processes after kill -9 (session 3); same-machine preference in semantic memory (session 5).
+
+Next: barbara live rehearsal (kill -9, resume, push_change); ken on alpine; QA acceptance report; page check; README/DEMO numbers.

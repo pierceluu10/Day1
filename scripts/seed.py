@@ -14,13 +14,16 @@ import time
 from pathlib import Path
 
 from dayone.config import ROOT, settings
-from dayone.contracts import HIRES, REPO, REPO_BRANCH, WELCOME_CHECKLIST, WELCOME_ISSUE_TITLE
-from dayone.gitea import GiteaClient, GiteaError, GiteaNotFound, read_admin_token
+from dayone.contracts import HIRES, REPO, REPO_BRANCH, WELCOME_ISSUE_TITLE
+from dayone.gitea import GiteaClient, GiteaError, GiteaNotFound, read_admin_token, welcome_body
 
-ORG, REPO_NAME = REPO.split("/")
+ORG = REPO.split("/")[0]
 TEAM = "engineering"
 TEAM_UNITS = ("repo.code", "repo.issues", "repo.pulls", "repo.releases", "repo.wiki")
-HIRE_EMAIL = "{hire}@acme.test"
+# Non-hire users the build sessions test with (3: terminal, 4: browser); read-only, no Welcome issue.
+DEV_USERS = ("dev3", "dev4")
+DEV_TEAM = "dev-readers"
+USER_EMAIL = "{username}@acme.test"
 DEMO_REPO = ROOT / "demo_repo"
 DEMO_REPO_IGNORED = (".venv", "__pycache__", "*.egg-info", ".pytest_cache", "settings.toml", "*.db")
 COMMIT_AUTHOR = ("Acme Engineering", "engineering@acme.test")
@@ -29,11 +32,6 @@ INITIAL_COMMIT_MESSAGE = "acme-api 1.4.0"
 COMMIT_DATE = "2026-11-02T09:00:00+00:00"
 FIRST_PUSH_ATTEMPTS = 20
 FIRST_PUSH_POLL_S = 0.5
-
-
-def welcome_body() -> str:
-    items = "\n".join(f"- [ ] {item}" for item in WELCOME_CHECKLIST.values())
-    return f"Welcome to the engineering team! Work through this list on your first day.\n\n{items}\n"
 
 
 def exists(gitea: GiteaClient, path: str) -> bool:
@@ -50,22 +48,22 @@ def ensure_org(gitea: GiteaClient) -> None:
         print(f"created org {ORG}")
 
 
-def ensure_team(gitea: GiteaClient) -> int:
+def ensure_team(gitea: GiteaClient, name: str, permission: str) -> int:
     for team in gitea.request("GET", f"/orgs/{ORG}/teams"):
-        if team["name"] == TEAM:
+        if team["name"] == name:
             return team["id"]
     team = gitea.request(
         "POST",
         f"/orgs/{ORG}/teams",
         json={
-            "name": TEAM,
-            "permission": "write",
+            "name": name,
+            "permission": permission,
             "includes_all_repositories": True,
             "units": list(TEAM_UNITS),
-            "units_map": {unit: "write" for unit in TEAM_UNITS},
+            "units_map": {unit: permission for unit in TEAM_UNITS},
         },
     )
-    print(f"created team {TEAM} (write on all {ORG} repos)")
+    print(f"created team {name} ({permission} on all {ORG} repos)")
     return team["id"]
 
 
@@ -74,10 +72,10 @@ def git(*args: str, cwd: Path) -> None:
     subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True, env=env)
 
 
-def push_demo_repo(gitea_url: str) -> None:
+def push_demo_repo(gitea_url: str, repo: str) -> None:
     name, email = COMMIT_AUTHOR
     with tempfile.TemporaryDirectory() as tmp:
-        work = Path(tmp) / REPO_NAME
+        work = Path(tmp) / repo.split("/")[1]
         shutil.copytree(DEMO_REPO, work, ignore=shutil.ignore_patterns(*DEMO_REPO_IGNORED))
         git("init", "-b", REPO_BRANCH, cwd=work)
         git("add", ".", cwd=work)
@@ -86,48 +84,52 @@ def push_demo_repo(gitea_url: str) -> None:
             "-c",
             f"http.extraHeader=Authorization: token {read_admin_token()}",
             "push",
-            f"{gitea_url.rstrip('/')}/{REPO}.git",
+            f"{gitea_url.rstrip('/')}/{repo}.git",
             f"{REPO_BRANCH}:{REPO_BRANCH}",
             cwd=work,
         )
 
 
-def ensure_repo(gitea: GiteaClient, gitea_url: str) -> None:
-    if not exists(gitea, f"/repos/{REPO}"):
-        gitea.request(
-            "POST", f"/orgs/{ORG}/repos", json={"name": REPO_NAME, "default_branch": REPO_BRANCH, "private": False}
-        )
-        print(f"created repo {REPO}")
-    if not exists(gitea, f"/repos/{REPO}/branches/{REPO_BRANCH}"):
-        push_demo_repo(gitea_url)
-        print(f"pushed demo_repo/ to {REPO} {REPO_BRANCH} at {first_push_head(gitea)[:7]}")
+def ensure_repo(gitea: GiteaClient, gitea_url: str, repo: str) -> None:
+    """Creates `repo` (owner/name, owner = an org) and pushes demo_repo/ to it unless its branch exists."""
+    owner, name = repo.split("/")
+    if not exists(gitea, f"/repos/{repo}"):
+        gitea.request("POST", f"/orgs/{owner}/repos", json={"name": name, "default_branch": REPO_BRANCH, "private": False})
+        print(f"created repo {repo}")
+    if not exists(gitea, f"/repos/{repo}/branches/{REPO_BRANCH}"):
+        push_demo_repo(gitea_url, repo)
+        print(f"pushed demo_repo/ to {repo} {REPO_BRANCH} at {first_push_head(gitea, repo)[:7]}")
 
 
-def first_push_head(gitea: GiteaClient) -> str:
+def first_push_head(gitea: GiteaClient, repo: str) -> str:
     # Gitea 1.24 panics (HTTP 500) on the branch API until it clears the repo's "empty" flag after the first push.
     for _ in range(FIRST_PUSH_ATTEMPTS - 1):
         try:
-            return gitea.branch_head(REPO, REPO_BRANCH)
+            return gitea.branch_head(repo, REPO_BRANCH)
         except GiteaError:
             time.sleep(FIRST_PUSH_POLL_S)
-    return gitea.branch_head(REPO, REPO_BRANCH)
+    return gitea.branch_head(repo, REPO_BRANCH)
 
 
-def ensure_hire(gitea: GiteaClient, team_id: int, hire: str, password: str) -> None:
-    if not exists(gitea, f"/users/{hire}"):
+def ensure_user(gitea: GiteaClient, team_id: int, username: str, password: str) -> None:
+    if not exists(gitea, f"/users/{username}"):
         gitea.request(
             "POST",
             "/admin/users",
             json={
-                "username": hire,
-                "email": HIRE_EMAIL.format(hire=hire),
+                "username": username,
+                "email": USER_EMAIL.format(username=username),
                 "password": password,
                 "must_change_password": False,
                 "send_notify": False,
             },
         )
-        print(f"created hire {hire}")
-    gitea.request("PUT", f"/teams/{team_id}/members/{hire}")
+        print(f"created user {username}")
+    gitea.request("PUT", f"/teams/{team_id}/members/{username}")
+
+
+def ensure_hire(gitea: GiteaClient, team_id: int, hire: str, password: str) -> None:
+    ensure_user(gitea, team_id, hire, password)
     title = WELCOME_ISSUE_TITLE.format(hire=hire)
     if gitea.find_issue(REPO, title) is None:
         issue = gitea.create_issue(REPO, title, welcome_body())
@@ -155,10 +157,13 @@ def main() -> None:
         if args.reset:
             reset(gitea)
         ensure_org(gitea)
-        team_id = ensure_team(gitea)
-        ensure_repo(gitea, config.gitea_url)
+        team_id = ensure_team(gitea, TEAM, "write")
+        dev_team_id = ensure_team(gitea, DEV_TEAM, "read")
+        ensure_repo(gitea, config.gitea_url, REPO)
         for hire in HIRES:
             ensure_hire(gitea, team_id, hire, config.gitea_hire_password)
+        for username in DEV_USERS:
+            ensure_user(gitea, dev_team_id, username, config.gitea_hire_password)
     finally:
         gitea.close()
     print("seeded")

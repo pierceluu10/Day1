@@ -2,17 +2,21 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 import httpx
 
 from dayone.config import GITEA_TOKEN_FILE, Settings
-from dayone.contracts import REPO, WELCOME_ISSUE_TITLE
+from dayone.contracts import REPO, WELCOME_CHECKLIST, WELCOME_ISSUE_TITLE
 
 API_PREFIX = "/api/v1"
 REQUEST_TIMEOUT_S = 15.0
 PAGE_LIMIT = 50
 HTTP_NOT_FOUND = 404
+# Gitea creates notifications from a queue, ~0.5 s after the event.
+NOTIFICATION_ATTEMPTS = 40
+NOTIFICATION_POLL_S = 0.25
 
 
 class GiteaError(RuntimeError):
@@ -36,6 +40,16 @@ class GiteaTokenMissing(RuntimeError):
 
 class GiteaUnreachable(RuntimeError):
     pass
+
+
+class GiteaNotificationMissing(RuntimeError):
+    pass
+
+
+def welcome_body() -> str:
+    """The seeded Welcome issue body: every WELCOME_CHECKLIST item, in order, unticked."""
+    items = "\n".join(f"- [ ] {item}" for item in WELCOME_CHECKLIST.values())
+    return f"Welcome to the engineering team! Work through this list on your first day.\n\n{items}\n"
 
 
 def read_admin_token() -> str:
@@ -78,11 +92,10 @@ class GiteaClient:
         return self.request("GET", f"/repos/{repo}/branches/{branch}")["commit"]["id"]
 
     def find_issue(self, repo: str, title: str) -> dict[str, Any] | None:
+        # No `q=` filter: Gitea's issue indexer is asynchronous and misses issues created a moment ago.
         page = 1
         while issues := self.request(
-            "GET",
-            f"/repos/{repo}/issues",
-            params={"state": "all", "type": "issues", "q": title, "limit": PAGE_LIMIT, "page": page},
+            "GET", f"/repos/{repo}/issues", params={"state": "all", "type": "issues", "limit": PAGE_LIMIT, "page": page}
         ):
             for issue in issues:
                 if issue["title"] == title:
@@ -94,8 +107,44 @@ class GiteaClient:
         title = WELCOME_ISSUE_TITLE.format(hire=username)
         issue = self.find_issue(REPO, title)
         if issue is None:
-            raise GiteaNotFound("GET", f"/repos/{REPO}/issues?q={title}", HTTP_NOT_FOUND, "no such issue")
+            raise GiteaNotFound("GET", f"/repos/{REPO}/issues", HTTP_NOT_FOUND, f"no issue titled {title!r}")
         return issue
 
     def create_issue(self, repo: str, title: str, body: str) -> dict[str, Any]:
         return self.request("POST", f"/repos/{repo}/issues", json={"title": title, "body": body})
+
+    def reset_hire(self, username: str) -> None:
+        """Back to the seeded state for one hire: no SSH keys, Welcome issue open and unticked, its notification unread."""
+        for key in self.user_keys(username):
+            self.request("DELETE", f"/admin/users/{username}/keys/{key['id']}")
+        issue_path = f"/repos/{REPO}/issues/{self.welcome_issue(username)['number']}"
+        self.request("PATCH", issue_path, json={"body": welcome_body(), "state": "open"})
+        threads = self.welcome_notifications(username)
+        if not threads:
+            # Recreate what the seed does: assigning the hire is what notifies them.
+            self.request("PATCH", issue_path, json={"assignees": []})
+            self.request("PATCH", issue_path, json={"assignees": [username]})
+            threads = self.await_welcome_notifications(username)
+        for thread in threads:
+            self.request(
+                "PATCH", f"/notifications/threads/{thread['id']}", params={"to-status": "unread", "sudo": username}
+            )
+
+    def await_welcome_notifications(self, username: str) -> list[dict[str, Any]]:
+        for _ in range(NOTIFICATION_ATTEMPTS):
+            if threads := self.welcome_notifications(username):
+                return threads
+            time.sleep(NOTIFICATION_POLL_S)
+        raise GiteaNotificationMissing(
+            f"no notification for {username}'s Welcome issue after {NOTIFICATION_ATTEMPTS * NOTIFICATION_POLL_S:.0f}s"
+        )
+
+    def welcome_notifications(self, username: str) -> list[dict[str, Any]]:
+        """The hire's own notification threads for their Welcome issue (read or unread), seen as the hire."""
+        issue_url = self.welcome_issue(username)["url"]
+        threads = self.request(
+            "GET",
+            "/notifications",
+            params={"all": "true", "subject-type": "issue", "sudo": username, "limit": PAGE_LIMIT},
+        )
+        return [thread for thread in threads if thread["subject"]["url"] == issue_url]
