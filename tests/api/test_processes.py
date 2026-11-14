@@ -69,6 +69,22 @@ def test_spawned_engine_killed_with_sigkill_is_reaped_and_reads_as_stopped(monke
     assert wait_until_stopped("ken"), "a SIGKILLed child of the API stayed 'running' (unreaped zombie)"
 
 
+def test_spawned_engine_that_exits_cleanly_is_reaped_even_after_clearing_its_pid_file(monkeypatch):
+    # The CLI clears its pid file on the way out, so the API never looks that hire up again.
+    real_popen = subprocess.Popen
+    monkeypatch.setattr(processes.subprocess, "Popen", lambda args, **kwargs: real_popen([sys.executable, "-c", "pass"], **kwargs))
+
+    pid = processes.spawn("grace", ["start", "--hire", "grace", "--machine", "debian"])
+    deadline = time.monotonic() + REAP_TIMEOUT_S
+    while pid in processes._children and time.monotonic() < deadline:
+        processes.running_pid("ada")  # any liveness check, as the page's polling does
+        time.sleep(0.05)
+
+    assert pid not in processes._children
+    with pytest.raises(ChildProcessError):
+        os.waitpid(pid, os.WNOHANG)  # already reaped: no zombie left behind
+
+
 def test_cli_rejects_unknown_hire_with_usage_exit():
     with pytest.raises(SystemExit) as exit_info:
         cli.main(["start", "--hire", "mallory", "--machine", "ubuntu"])

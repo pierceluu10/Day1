@@ -36,16 +36,23 @@ def clear_pid(hire: str) -> None:
     pid_file(hire).unlink(missing_ok=True)
 
 
+def _reap_children() -> None:
+    """Waits on every exited child, including runs that cleared their own pid file and so are never looked up."""
+    for pid, child in list(_children.items()):
+        if child.poll() is not None:
+            del _children[pid]
+
+
 def running_pid(hire: str) -> int | None:
     """Pid of the live engine for this hire, or None. A `kill -9` leaves the pid file behind; liveness decides.
     shortcut: a reused pid after a reboot reads as running, until the pid file is cleared by the next run."""
+    _reap_children()
     try:
         pid = int(pid_file(hire).read_text())
     except (FileNotFoundError, ValueError):
         return None
-    child = _children.get(pid)
-    if child is not None:
-        return pid if child.poll() is None else None
+    if pid in _children:
+        return pid
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
