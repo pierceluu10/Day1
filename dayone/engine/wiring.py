@@ -36,6 +36,7 @@ def open_parts(settings: Settings, store: AtlasStore, hire: Hire) -> Iterator[Pa
     try:
         gitea = GiteaClient(settings)
         memory = ExperienceMemory(store.db, AnthropicLLM(settings), VoyageEmbedder(settings), events, gitea, settings)
+        memory.ensure_indexes()
         browser = PlaywrightSession(hire, settings, events, memory)
         try:
             yield Parts(

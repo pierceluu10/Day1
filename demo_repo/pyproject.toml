@@ -1,0 +1,21 @@
+[project]
+name = "acme-api"
+version = "1.4.0"
+description = "Acme's users service"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi==0.163.0",
+  "httpx==0.28.1",
+  "psycopg2==2.9.10",
+  "pytest==8.3.4",
+]
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["acme_api"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
