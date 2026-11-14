@@ -5,14 +5,13 @@ a step left `pending` by a kill gets a check result before any re-run; the ledge
 with the event log; the final state matches a clean run of the same hire (statuses may differ only
 by a step being `skipped`; evidence equal once key fingerprints and durations are masked).
 
-Mutates Gitea: commits one file to acme/acme-api to cause drift (scripts/reset.sh restores the repo).
+Drift is caused inside the hire's own container (its checkout is moved back one commit while the agent
+is dead), so a verified check no longer passes; shared Gitea and acme/acme-api are never touched.
 """
 
 from __future__ import annotations
 
-import base64
 import re
-import time
 from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -21,12 +20,13 @@ from typing import Any
 import pytest
 
 from atlas import ledger, of_type, run_events
-from dayone.contracts import DONE_STATUSES, REPO, REPO_BRANCH, STEP_IDS, EventType, Machine, StepStatus
-from harness import Agent, EventWatcher, requires_system
+from dayone.contracts import DONE_STATUSES, REPO_DIR, STEP_IDS, EventType, Machine, StepStatus
+from harness import Agent, EventWatcher, container_exec, requires_system
 
 pytestmark = [pytest.mark.system, requires_system]
 
-DRIFT_PATH = "qa/drift-{ns}.md"
+DRIFT_STEP = "t_clone"
+DRIFT_COMMAND = f"git -C {REPO_DIR} reset -q --hard HEAD~1"
 DOWNSTREAM_OF_HEAD = STEP_IDS[STEP_IDS.index("t_clone") :]
 TERMINAL_HEAVY_STEPS = frozenset({"t_install_deps", "t_run_tests"})
 VOLATILE = (
@@ -42,7 +42,7 @@ Predicate = Callable[[dict[str, Any], str | None], bool]
 class KillPoint:
     name: str
     predicate: Predicate
-    drift_before_resume: bool = False  # the drift commit lands while the agent is dead
+    drift_before_resume: bool = False  # a verified step is broken while the agent is dead
 
 
 def is_event(type: EventType, step_id: str | None = None) -> Predicate:
@@ -68,20 +68,12 @@ def mask(evidence: str) -> str:
     return evidence
 
 
-def push_drift_commit(gitea) -> str:
-    path = DRIFT_PATH.format(ns=time.time_ns())
-    gitea.request(
-        "POST",
-        f"/repos/{REPO}/contents/{path}",
-        json={
-            "content": base64.b64encode(b"QA drift marker\n").decode(),
-            "message": f"qa: drift marker {path}",
-            "branch": REPO_BRANCH,
-        },
-    )
-    head = gitea.branch_head(REPO, REPO_BRANCH)
-    print(f"pushed {path}; {REPO} {REPO_BRANCH} HEAD is now {head}")
-    return head
+def break_verified_step(hire: str, steps: dict[str, dict[str, Any]]) -> None:
+    assert steps[DRIFT_STEP]["status"] in DONE_STATUSES, f"{DRIFT_STEP} not done yet, so breaking it is not drift"
+    moved = container_exec(hire, DRIFT_COMMAND)
+    assert moved.returncode == 0, moved.stdout + moved.stderr
+    head = container_exec(hire, f"git -C {REPO_DIR} rev-parse --short HEAD").stdout.strip()
+    print(f"drift: `{DRIFT_COMMAND}` in {hire}'s container, local HEAD now {head}")
 
 
 def invalidated_by(event: dict[str, Any]) -> list[str]:
@@ -123,7 +115,7 @@ def print_ledger(title: str, steps: dict[str, dict[str, Any]]) -> None:
         print(f"  {step_id:18} {doc.get('status')!s:20} runs={doc.get('run_count')} | {doc.get('evidence')}")
 
 
-def test_kill_nine_at_five_points_then_resume(onboard, db, gitea, log_dir, fresh_hire, hires):
+def test_kill_nine_at_five_points_then_resume(onboard, db, log_dir, fresh_hire, hires):
     hire, donor_name = hires["killed"], hires["first"]
     donor = onboard(donor_name, Machine.UBUNTU)
     assert donor.exit_code == 0, f"{donor_name}'s run must succeed first so {hire} resolves from memory"
@@ -140,7 +132,7 @@ def test_kill_nine_at_five_points_then_resume(onboard, db, gitea, log_dir, fresh
         pending_at_kill.append(pending)
         print_ledger(f"after kill -9 {point.name}: pending {sorted(pending)}", steps)
         if point.drift_before_resume:
-            push_drift_commit(gitea)
+            break_verified_step(hire, steps)
         agent = Agent(log_dir, "resume", "--hire", hire)
     assert agent.wait() == 0, agent.output_tail()
 
