@@ -107,7 +107,12 @@ class PlaywrightSession:
     def act(self, goal: str, action: Action, value: str = "", step_id: str | None = None) -> Locator:
         """Find `goal` from memory (green), else show "This moved." (red) and reason over the page (amber)."""
         summary = self.page_summary()
-        hint = self.memory.find_locator(goal, summary) or self._seed(goal, summary)
+        remembered = self.memory.find_locator(goal, summary)
+        # A semantic hit for another goal on the same page (the username field for "remember me") is a
+        # different element, never this one: only a locator saved for this exact goal is trusted.
+        if remembered is not None and remembered.goal != goal:
+            remembered = None
+        hint = remembered or self._seed(goal, summary)
         if hint is not None:
             target = self._resolve(hint.locator)
             if target is not None:
