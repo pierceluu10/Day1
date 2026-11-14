@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Removes every dayone-* hire container and restores Gitea to its freshly seeded state.
+# Removes every dayone-* hire container and restores Gitea to its freshly seeded state (stock UI included).
 # Atlas is untouched (`dayone reset` does that). The admin user and token survive.
 set -euo pipefail
 
@@ -13,3 +13,4 @@ if [ -n "$containers" ]; then
 fi
 
 "$ROOT/scripts/up.sh" --reset
+"$ROOT/scripts/restore_ui.sh"
