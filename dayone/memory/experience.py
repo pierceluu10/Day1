@@ -6,7 +6,7 @@ import json
 import re
 import time
 from collections.abc import Callable
-from dataclasses import asdict, dataclass, field, replace
+from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime
 from typing import Any
 
@@ -42,13 +42,16 @@ DOCUMENT = "document"
 QUERY = "query"
 
 INDEX_POLL_S = 5.0
+INDEX_READY = "READY"
 INDEX_WAIT_S = 300.0
 NUM_CANDIDATES = 100
 HINT_COUNT = 3
 SEMANTIC_MIN_SIMILARITY = 0.8  # Atlas cosine score; Phase 0 saw 0.847 for the right fix, 0.73 for the next one
 MAX_REASONING_ATTEMPTS = 3
-MAX_TOKENS = 1024
+MAX_TOKENS = 2048  # replies carry inspect lists; a cut-off reply is rejected and wastes an attempt
 ERROR_TAIL_CHARS = 4000  # pip/apt failures put the cause at the end
+FEEDBACK_CHARS = 3000  # all fix commands' output fed back to the next attempt, split evenly
+FIX_OUTPUT = "fix_output"  # CheckResult.detail key: [{"command", "exit_code", "output"}] from try_fix
 ISSUE_ERROR_LINES = 15
 ISSUE_TITLE_COMMAND_CHARS = 120
 README_MIN_HIRES = 2
@@ -60,13 +63,20 @@ APT_NONINTERACTIVE = "DEBIAN_FRONTEND=noninteractive "
 
 FIX_RULES = f"""Commands run as root with `sh -lc` in the new hire's throwaway container, in {REPO_DIR} when it exists.
 Use the machine's own package manager. Non-interactive only (-y, --no-cache), no sudo, one command per string,
-do not chain with && or ;. Commands from earlier attempts already ran; only add what is still needed.
-Reply with strict JSON and nothing else: {{"commands": ["..."], "rationale": "one sentence"}}"""
+do not chain with && or ;. Commands from earlier attempts already ran; only add what is still needed."""
+STRICT_JSON = "Reply with strict JSON and nothing else: "
 
-REASON_SYSTEM = f"You fix failed setup steps on a new hire's development machine.\n{FIX_RULES}"
+REASON_SYSTEM = f"""You fix failed setup steps on a new hire's development machine.
+The team's repository is cloned at {REPO_DIR} (once the clone step has passed): its files, scripts and docs often
+name the exact setup command. You may read them first with read-only `inspect` commands (ls, cat, grep); their
+output, with every command's exit code, comes back to you if the step still fails. Every attempt must also try a fix
+in `commands`, and `commands` must hold only the fix, never inspection.
+{FIX_RULES}
+{STRICT_JSON}{{"inspect": ["..."], "commands": ["..."], "rationale": "one sentence"}}"""
 ADAPT_SYSTEM = (
     "You adapt a setup fix that worked on one machine to a different machine (for example apt to apk), "
-    f"keeping its intent and translating package names.\n{FIX_RULES}"
+    f"keeping its intent and translating package names.\n{FIX_RULES}\n"
+    f'{STRICT_JSON}{{"commands": ["..."], "rationale": "one sentence"}}'
 )
 
 
@@ -83,7 +93,6 @@ class _Progress:
     initial: CheckResult
     attempts: int = 0
     llm_calls: int = 0
-    applied: list[str] = field(default_factory=list)  # every command run since the failure, in order
     last_check: CheckResult | None = None
 
     def resolution(self, proposal: FixProposal | None) -> Resolution:
@@ -134,12 +143,18 @@ def guard_commands(commands: list[str]) -> tuple[str, ...]:
                     command = command.replace(" install", " install -y", 1)
                 command = APT_NONINTERACTIVE + command
             guarded.append(command)
-    if not guarded:
-        raise LLMResponseError("no runnable commands in the reply")
     return tuple(guarded)
 
 
-def parse_fix(reply: str) -> tuple[tuple[str, ...], str]:
+def _strings(body: dict[str, Any], key: str) -> list[str]:
+    value = body.get(key, [])
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        raise LLMResponseError(f"`{key}` must be a list of strings")
+    return value
+
+
+def parse_fix(reply: str) -> tuple[tuple[str, ...], tuple[str, ...], str]:
+    """(inspect, commands, rationale) from the model's strict-JSON reply; `commands` is the fix and never empty."""
     start, end = reply.find("{"), reply.rfind("}")
     if start < 0 or end < start:
         raise LLMResponseError(f"no JSON object in reply: {reply[:200]!r}")
@@ -147,10 +162,25 @@ def parse_fix(reply: str) -> tuple[tuple[str, ...], str]:
         body = json.loads(reply[start : end + 1])
     except json.JSONDecodeError as error:
         raise LLMResponseError(f"invalid JSON: {error}") from error
-    commands, rationale = body.get("commands"), body.get("rationale", "")
-    if not isinstance(commands, list) or not all(isinstance(command, str) for command in commands):
-        raise LLMResponseError("`commands` must be a list of strings")
-    return guard_commands(commands), str(rationale)
+    if "commands" not in body:
+        raise LLMResponseError("`commands` is missing")
+    commands = guard_commands(_strings(body, "commands"))
+    if not commands:
+        raise LLMResponseError("no runnable commands in the reply")
+    # try_fix stops at the first failing command, and a grep with no match exits 1: inspection must never abort the fix.
+    inspect = tuple(f"{command} || true" for command in guard_commands(_strings(body, "inspect")))
+    return inspect, commands, str(body.get("rationale", ""))
+
+
+def command_feedback(check: CheckResult) -> str:
+    """What the fix commands printed, from the engine's `detail[FIX_OUTPUT]`, capped so the prompt stays small."""
+    results = check.detail.get(FIX_OUTPUT, [])
+    if not results:
+        return ""
+    budget = FEEDBACK_CHARS // len(results)
+    return "\n".join(
+        f"$ {result['command']}  (exit {result['exit_code']})\n{result['output'][-budget:].rstrip()}" for result in results
+    )
 
 
 class ExperienceMemory:
@@ -168,22 +198,35 @@ class ExperienceMemory:
 
     def ensure_indexes(self) -> None:
         self._experiences.create_index("fingerprint")  # also creates the collection the search index needs
-        if not list(self._experiences.list_search_indexes(VECTOR_INDEX)):
-            definition = {
-                "fields": [
-                    {"type": "vector", "path": "embedding", "numDimensions": self._dimensions, "similarity": "cosine"},
-                    {"type": "filter", "path": "outcome"},
-                    {"type": "filter", "path": "kind"},
-                ]
-            }
+        definition = {
+            "fields": [
+                {"type": "vector", "path": "embedding", "numDimensions": self._dimensions, "similarity": "cosine"},
+                {"type": "filter", "path": "outcome"},
+                {"type": "filter", "path": "kind"},
+                {"type": "filter", "path": "context.step_id"},
+            ]
+        }
+        existing = list(self._experiences.list_search_indexes(VECTOR_INDEX))
+        if not existing:
             self._experiences.create_search_index(
                 SearchIndexModel(definition=definition, name=VECTOR_INDEX, type="vectorSearch")
             )
+        elif existing[0]["latestDefinition"] != definition:
+            self._experiences.update_search_index(VECTOR_INDEX, definition)
         deadline = time.monotonic() + INDEX_WAIT_S
-        while not all(index.get("queryable") for index in self._experiences.list_search_indexes(VECTOR_INDEX)):
+        while not self._index_ready(definition):
             if time.monotonic() > deadline:
-                raise IndexNotReady(f"{VECTOR_INDEX} not queryable after {INDEX_WAIT_S:.0f}s")
+                raise IndexNotReady(f"{VECTOR_INDEX} not ready after {INDEX_WAIT_S:.0f}s")
             time.sleep(INDEX_POLL_S)
+
+    def _index_ready(self, definition: dict[str, Any]) -> bool:
+        # After an update the old version stays queryable while the new one builds; filters on new fields fail until
+        # the new version is READY, so wait for status as well as queryable.
+        indexes = list(self._experiences.list_search_indexes(VECTOR_INDEX))
+        return bool(indexes) and all(
+            index.get("queryable") and index.get("status") == INDEX_READY and index["latestDefinition"] == definition
+            for index in indexes
+        )
 
     # --- terminal fixes -----------------------------------------------------------
 
@@ -212,7 +255,9 @@ class ExperienceMemory:
                 self._events.emit(EventType.MEMORY_HIT, failure.step_id, **_proposal_data(proposal))
                 if self._try(failure, proposal, try_fix, progress):
                     if proposal.adapted_from:
-                        saved = self._save(failure, progress, proposal, adapted_from_experience=semantic["_id"])
+                        saved = self._save(
+                            failure, proposal.commands, progress, proposal, adapted_from_experience=semantic["_id"]
+                        )
                         proposal = replace(proposal, experience_id=str(saved))
                     else:
                         self._record_reuse(semantic["_id"], failure.hire)
@@ -243,7 +288,8 @@ class ExperienceMemory:
                     "queryVector": vector,
                     "numCandidates": NUM_CANDIDATES,
                     "limit": HINT_COUNT + 1,  # room for the excluded exact match
-                    "filter": {"outcome": VERIFIED, "kind": failure.kind},
+                    # Same step only: a t_runtime fix scored 0.822 against a t_system_package error and wasted a try.
+                    "filter": {"outcome": VERIFIED, "kind": failure.kind, "context.step_id": failure.step_id},
                 }
             },
             {"$set": {"score": {"$meta": "vectorSearchScore"}}},
@@ -274,7 +320,7 @@ class ExperienceMemory:
         )
         progress.llm_calls += 1
         try:
-            commands, rationale = parse_fix(self._llm.complete(ADAPT_SYSTEM, prompt, MAX_TOKENS))
+            _, commands, rationale = parse_fix(self._llm.complete(ADAPT_SYSTEM, prompt, MAX_TOKENS))
         except LLMResponseError:
             return None
         return replace(base, commands=commands, rationale=rationale, adapted_from=original.package_manager)
@@ -293,6 +339,8 @@ class ExperienceMemory:
             for hint in hints
         )
         history: list[str] = []
+        # The saved fix is this chain only: a memory proposal that already failed is not part of what fixed it.
+        chain: list[str] = []
         error = failure.error_text
         for _ in range(MAX_REASONING_ATTEMPTS):
             prompt = (
@@ -303,18 +351,25 @@ class ExperienceMemory:
             )
             progress.llm_calls += 1
             try:
-                commands, rationale = parse_fix(self._llm.complete(REASON_SYSTEM, prompt, MAX_TOKENS))
+                inspect, commands, rationale = parse_fix(self._llm.complete(REASON_SYSTEM, prompt, MAX_TOKENS))
             except LLMResponseError as reply_error:
                 history.append(f"Your reply was rejected: {reply_error}")
                 continue
-            proposal = FixProposal(commands=commands, source=FixSource.REASONING, rationale=rationale)
+            proposal = FixProposal(commands=inspect + commands, source=FixSource.REASONING, rationale=rationale)
+            chain.extend(commands)
             if self._try(failure, proposal, try_fix, progress):
-                saved = self._save(failure, progress, proposal)
+                saved = self._save(failure, tuple(chain), progress, proposal)
                 return progress.resolution(replace(proposal, experience_id=str(saved)))
             check = progress.last_check
             error = check.error_text or check.evidence
-            self._save_failed(failure, commands, check)
-            history.append("Ran:\n" + "\n".join(commands) + f"\nThe step still fails with:\n{_tail(error)}")
+            self._save_failed(failure, proposal.commands, check)
+            output = command_feedback(check)
+            history.append(
+                "Ran:\n"
+                + "\n".join(proposal.commands)
+                + (f"\nCommand output:\n{output}" if output else "")
+                + f"\nThe step's check still fails with:\n{_tail(error)}"
+            )
         return progress.resolution(None)
 
     def _try(
@@ -326,7 +381,6 @@ class ExperienceMemory:
     ) -> bool:
         check = try_fix(proposal)
         progress.attempts += 1
-        progress.applied.extend(proposal.commands)
         progress.last_check = check
         self._events.emit(
             EventType.FIX_ATTEMPT,
@@ -346,6 +400,7 @@ class ExperienceMemory:
     def _save(
         self,
         failure: Failure,
+        fix_commands: tuple[str, ...],
         progress: _Progress,
         proposal: FixProposal,
         adapted_from_experience: ObjectId | None = None,
@@ -356,7 +411,7 @@ class ExperienceMemory:
             "fingerprint": failure.fingerprint,
             "error_text": failure.error_text,
             "context": self._context(failure),
-            "fix_commands": list(progress.applied),
+            "fix_commands": list(fix_commands),
             "rationale": proposal.rationale,
             "source": proposal.source,
             "adapted_from": proposal.adapted_from,
