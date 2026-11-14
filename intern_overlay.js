@@ -13,6 +13,7 @@
   };
   const RING_PADDING_PX = 6;
   const FOLLOW_INTERVAL_MS = 120;
+  const TAG_CLEARANCE_PX = 40; // room the tag needs outside the ring
 
   let root = null;
   let ring = null;
@@ -36,11 +37,11 @@
         }
         .ring.on { opacity: 1; transform: scale(1); }
         .tag {
-          position: absolute; left: -3px; bottom: calc(100% + 6px); white-space: nowrap;
+          position: absolute; left: -3px; top: calc(100% + 6px); white-space: nowrap;
           font: 600 13px/1 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
           color: #fff; background: var(--c); padding: 6px 9px; border-radius: 6px;
         }
-        .ring.below .tag { bottom: auto; top: calc(100% + 6px); }
+        .ring.above .tag { top: auto; bottom: calc(100% + 6px); }
         .ring.inside .tag { bottom: auto; top: 10px; left: 10px; font-size: 18px; padding: 10px 14px; }
         @media (prefers-reduced-motion: reduce) { .ring { transition: opacity 120ms linear; transform: none; } }
       </style>
@@ -58,7 +59,9 @@
     ring.style.top = `${y}px`;
     ring.style.width = `${rect.width + RING_PADDING_PX * 2}px`;
     ring.style.height = `${rect.height + RING_PADDING_PX * 2}px`;
-    ring.classList.toggle("below", y < 40);
+    // Below by default: form labels sit directly above their fields, so a tag above would cover them.
+    const bottom = y + rect.height + RING_PADDING_PX * 2;
+    ring.classList.toggle("above", bottom + TAG_CLEARANCE_PX > window.innerHeight && y > TAG_CLEARANCE_PX);
   }
 
   function rectFor({ selector, bbox }) {

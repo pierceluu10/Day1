@@ -31,6 +31,13 @@ def test_pip_noise_differs_but_the_cause_matches():
     assert normalise(ubuntu) == normalise(alpine) == "Error: pg_config executable not found."
 
 
+def test_missing_header_matches_across_compilers_and_differs_from_pg_config():
+    debian, ubuntu = _error("debian_t_system_package_ldap.full.txt"), _error("ubuntu_t_system_package_ldap.full.txt")
+    print(normalise(debian))
+    assert normalise(debian) == normalise(ubuntu) == "Modules<path>:<n>:<n>: fatal error: lber.h: No such file or directory"
+    assert fingerprint(debian) != fingerprint(_error("debian_t_system_package.txt"))
+
+
 def test_different_snags_do_not_collide():
     names = ["ubuntu_t_runtime.txt", "ubuntu_t_system_package.txt", "ubuntu_t_settings.txt", "ubuntu_t_init_db.txt"]
     fingerprints = {fingerprint(_error(name)) for name in names}
