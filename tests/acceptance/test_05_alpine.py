@@ -14,6 +14,11 @@ SOURCE_MANAGER = "apt"
 TARGET_MANAGER = "apk"
 
 
+def adapted_from(data: dict, manager: str) -> bool:
+    """`adapted_from` names the source machine, e.g. "apt" or "ubuntu 22.04, apt"."""
+    return manager in (data.get("adapted_from") or "").replace(",", " ").split()
+
+
 def test_alpine_adapts_an_apt_fix_found_by_vector_search(onboard, db, hires):
     distinct(hires, "first", "alpine")
     training_hire, hire = hires["first"], hires["alpine"]
@@ -29,7 +34,7 @@ def test_alpine_adapts_an_apt_fix_found_by_vector_search(onboard, db, hires):
     hits = [
         event
         for event in of_type(run_events(db, hire, run.run_id), EventType.MEMORY_HIT)
-        if event["data"].get("source") == FixSource.SEMANTIC_MEMORY and event["data"].get("adapted_from") == SOURCE_MANAGER
+        if event["data"].get("source") == FixSource.SEMANTIC_MEMORY and adapted_from(event["data"], SOURCE_MANAGER)
     ]
     for hit in hits:
         print(f"semantic hit {hit['step_id']}: {hit['data']}")
