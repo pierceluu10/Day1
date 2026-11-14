@@ -79,7 +79,7 @@ in `commands`, and `commands` must hold only the fix, never inspection.
 {FIX_RULES}
 {STRICT_JSON}{{"inspect": ["..."], "commands": ["..."], "rationale": "one sentence"}}"""
 ADAPT_SYSTEM = (
-    "You adapt a setup fix that worked on one machine to a different machine (for example apt to apk), "
+    "You adapt a setup fix that worked on one machine to a different machine (for example apt to apk, or Ubuntu to Debian), "
     f"keeping its intent and translating package names.\n{FIX_RULES}\n"
     f'{STRICT_JSON}{{"commands": ["..."], "rationale": "one sentence"}}'
 )
@@ -129,6 +129,11 @@ def _facts_from(context: dict[str, Any]) -> MachineFacts:
         package_manager=context["package_manager"],
         tools=context.get("tools", {}),
     )
+
+
+def _machine(facts: MachineFacts) -> str:
+    """What a fix depends on: "ubuntu 22.04, apt". Tool versions are left out, the fix usually changes them."""
+    return f"{facts.os_family} {facts.os_version}, {facts.package_manager}"
 
 
 def _proposal_data(proposal: FixProposal) -> dict[str, Any]:
@@ -297,6 +302,9 @@ class ExperienceMemory:
                 "fingerprint": failure.fingerprint,
                 "outcome": VERIFIED,
                 "kind": failure.kind,
+                # Same machine only: ubuntu's deadsnakes PPA fix fails on debian although both use apt.
+                "context.os_family": failure.facts.os_family,
+                "context.os_version": failure.facts.os_version,
                 "context.package_manager": failure.facts.package_manager,
             },
             sort=[("uses", DESCENDING)],
@@ -334,20 +342,21 @@ class ExperienceMemory:
             source_hire=hit["hire"],
         )
         original = _facts_from(hit["context"])
-        if original.package_manager == failure.facts.package_manager:
+        if _machine(original) == _machine(failure.facts):
             return base
         prompt = (
             f"This fix was verified on {original.summary()} for this error:\n{_tail(hit['error_text'])}\n\n"
             "Commands that fixed it there:\n" + "\n".join(hit["fix_commands"]) + "\n\n"
             f"Now machine {failure.facts.summary()} fails step {failure.step_id} with:\n{_tail(failure.error_text)}\n\n"
-            f"Rewrite the commands for {failure.facts.os_family} using {failure.facts.package_manager}."
+            f"Rewrite the commands for {_machine(failure.facts)}; anything specific to {original.os_family} "
+            "(its repositories, PPAs, package names) must become this machine's equivalent."
         )
         progress.llm_calls += 1
         try:
             _, commands, rationale = parse_fix(self._llm.complete(ADAPT_SYSTEM, prompt, MAX_TOKENS))
         except LLMResponseError:
             return None
-        return replace(base, commands=commands, rationale=rationale, adapted_from=original.package_manager)
+        return replace(base, commands=commands, rationale=rationale, adapted_from=_machine(original))
 
     def _reason(
         self,
