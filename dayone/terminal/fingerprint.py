@@ -11,9 +11,14 @@ import re
 FINGERPRINT_LENGTH = 16
 # Only lines that state an error take part (like Sentry grouping on exception type and message), so progress,
 # warnings and tracebacks around it do not. Text with no such line is fingerprinted whole.
-ERROR_LINE = re.compile(r"^(?:[\w.]*(?:Error|Exception)|error|fatal)\b\s*:", re.I)
-# pip's wrapper lines around a failed build vary by pip version and say nothing about the cause.
-WRAPPER_LINE = re.compile(r"subprocess-exited-with-error|metadata-generation-failed|Failed to build '", re.I)
+ERROR_LINE = re.compile(r"^(?:[\w.]*(?:Error|Exception)|error|fatal)\b\s*:|\bfatal error:", re.I)
+# pip's and setuptools' wrapper lines around a failed build vary by pip version and compiler, and say nothing
+# about the cause.
+WRAPPER_LINE = re.compile(
+    r"subprocess-exited-with-error|metadata-generation-failed|Failed to build|Failed building wheel"
+    r"|returned non-zero exit status",
+    re.I,
+)
 
 # Order matters: broad shapes (timestamps, URLs, paths) go before the numbers inside them.
 SUBSTITUTIONS: tuple[tuple[re.Pattern[str], str], ...] = (
@@ -33,7 +38,7 @@ SUBSTITUTIONS: tuple[tuple[re.Pattern[str], str], ...] = (
 
 def normalise(error_text: str) -> str:
     lines = [line.strip() for line in error_text.splitlines() if line.strip()]
-    lines = [line for line in lines if ERROR_LINE.match(line) and not WRAPPER_LINE.search(line)] or lines
+    lines = [line for line in lines if ERROR_LINE.search(line) and not WRAPPER_LINE.search(line)] or lines
     normalised = []
     for line in lines:
         for pattern, replacement in SUBSTITUTIONS:
