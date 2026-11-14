@@ -12,8 +12,6 @@ from harness import container_exec, requires_system
 pytestmark = [pytest.mark.system, requires_system]
 
 PASSED_COUNT = re.compile(r"(\d+) passed")
-# Each earlier step ticks its own Welcome item, so by its turn b_checklist's check already passes.
-TICKED_BY_EARLIER_STEPS = frozenset({"b_checklist"})
 FIXED_STATUSES = frozenset({StepStatus.FIXED_FROM_MEMORY.value, StepStatus.FIXED_BY_REASONING.value})
 REASONED = {StepStatus.FIXED_BY_REASONING.value: FixSource.REASONING.value}
 
@@ -40,8 +38,6 @@ def test_empty_ubuntu_container_reaches_passing_tests(onboard, db, gitea, hires)
             problems.append(f"{step_id}: status {doc['status']}")
         if not doc["evidence"].strip():
             problems.append(f"{step_id} has no evidence")
-        if step_id in TICKED_BY_EARLIER_STEPS:
-            continue
         if doc["status"] == StepStatus.SKIPPED:
             problems.append(f"{step_id} passed its check on an empty container: the check is wrong")
         if doc["check_ever_failed"] is not True:
@@ -75,9 +71,6 @@ def test_empty_ubuntu_container_reaches_passing_tests(onboard, db, gitea, hires)
         checked = first_index(events, EventType.STEP_CHECK_RESULT, step_id)
         pending = first_index(events, EventType.STEP_PENDING, step_id)
         final = first_index(events, EventType.STEP_STATUS, step_id)
-        if step_id in TICKED_BY_EARLIER_STEPS:
-            assert checked is not None and final is not None and checked < final, (step_id, checked, final)
-            continue
         assert checked is not None and pending is not None and final is not None, (step_id, checked, pending, final)
         assert checked < pending < final, f"{step_id}: check {checked}, pending {pending}, status {final}"
 

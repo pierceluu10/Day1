@@ -30,9 +30,15 @@ class Run:
 
 @pytest.fixture(scope="session")
 def hires(request: pytest.FixtureRequest) -> dict[str, str]:
-    """Role -> Gitea hire. `--hire NAME` maps every role to NAME, for when other hires are in use."""
+    """Role -> Gitea hire. `--hire NAME` maps every role to NAME; `--role ROLE=NAME` then overrides one role."""
     only = request.config.getoption("--hire")
-    return dict.fromkeys(DEFAULT_HIRES, only) if only else DEFAULT_HIRES
+    roles = dict.fromkeys(DEFAULT_HIRES, only) if only else dict(DEFAULT_HIRES)
+    for assignment in request.config.getoption("--role"):
+        role, _, name = assignment.partition("=")
+        if role not in DEFAULT_HIRES or not name:
+            raise pytest.UsageError(f"--role {assignment!r}: expected ROLE=HIRE with ROLE in {sorted(DEFAULT_HIRES)}")
+        roles[role] = name
+    return roles
 
 
 @pytest.fixture(scope="session")
