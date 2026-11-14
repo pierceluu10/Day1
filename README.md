@@ -76,17 +76,18 @@ Collections: `hires` (lease, container, run), `steps` (unique on hire and step),
 
 ## Measured (from Atlas, `MONGODB_DB=dayone`)
 
-Three training hires run one after another on a freshly reset Gitea, `acme-api` at c9d8d7f, finishing 15:15. Measured with `uv run python tests/acceptance/measure.py`, which reads only Atlas.
+Four hires run one after another on a freshly reset Gitea, `acme-api` at c9d8d7f, between 15:08 and 15:29. Measured with `uv run python tests/acceptance/measure.py`, which reads only Atlas.
 
 | Hire | Machine | LLM calls | Fixed by reasoning | Fixed from memory | Errors | Elapsed |
 |---|---|---|---|---|---|---|
 | ada | ubuntu | 7 | 4 | 0 | 4 | 2m 55s |
 | grace | debian | 4 | 0 | 4 (similar error, adapted from ubuntu) | 4 | 3m 54s |
 | linus | ubuntu | 0 | 0 | 4 (exact match) | 4 | 2m 36s |
+| ken | alpine, never seen | 3 | 0 | 3 (similar error, adapted from ubuntu and debian) | 3 | 8m 40s |
 
-The headline is the LLM column. Ada solved all four snags by reasoning, which took 7 calls because three steps needed a second attempt. Grace on Debian found each of ada's fixes by vector search (similarity 0.92 to 0.95) and spent one call per fix adapting it. Linus matched every error exactly and made no LLM call at all. Every hire still ended at "13 passed of 13, exit 0 at c9d8d7f".
+The headline is the LLM column. Ada solved all four snags by reasoning, which took 7 calls because three steps needed a second attempt. Grace on Debian found each of ada's fixes by vector search (similarity 0.92 to 0.95) and spent one call per fix adapting it. Linus matched every error exactly and made no LLM call at all. Ken on Alpine, a machine no hire had used, got ada's apt fix for psycopg2 by vector search (similarity 0.94), adapted to `apk add --no-cache postgresql-dev build-base python3-dev musl-dev`. The settings and database fixes came from grace's Debian run the same way. Alpine ships Python 3.12, so the runtime snag never fired. Every hire still ended at "13 passed of 13, exit 0 at c9d8d7f".
 
-Wall-clock time barely moves, and that is honest, not a bug: the time is spent installing Python 3.12 and compiling psycopg2, which a remembered fix still has to do. In linus's run those two steps took 31 s and 42 s of 156 s; reasoning saved about 20 s on the same OS. Grace was slowest because Debian's installs ran longer (86 s for the system package step) and each adapted fix cost an LLM call. Apt mirror speed alone moves a run by 10 to 15 s (`t_base_tools`: 15 s for ada, 28 s for linus).
+Wall-clock time barely moves, and that is honest, not a bug: the time is spent installing Python 3.12 and compiling psycopg2, which a remembered fix still has to do. In linus's run those two steps took 31 s and 42 s of 156 s; reasoning saved about 20 s on the same OS. Ken took 8m 40s because psycopg2 has no musl wheel and compiled for 409 s after memory had already supplied the right packages. Grace was slower than ada because Debian's installs ran longer (86 s for the system package step) and each adapted fix cost an LLM call. Apt mirror speed alone moves a run by 10 to 15 s (`t_base_tools`: 15 s for ada, 28 s for linus).
 
 Once linus applied the same four fixes as ada, the agent opened README issues #10 to #13 on `acme-api`, one per snag. Example: "README: t_settings on ubuntu needs `cp /root/acme-api/settings.example.toml /root/acme-api/settings.toml`".
 
@@ -117,7 +118,7 @@ uv run python -u -m pytest --acceptance tests/acceptance -v -s     # real contai
 
 Built today in this repo: the agent (engine, ledger, memory, browser and terminal steps), the page and API, the demo repository `acme-api` and its four snags, the Gitea seed and scripts, the overlay, and the acceptance tests. Third-party: Gitea, Playwright, FastAPI, pymongo, Claude (reasoning and adapting) and Voyage `voyage-3.5` (embeddings via Atlas).
 
-Pre-recorded for the demo: the runs of ada, grace and linus are made before the demo so that memory holds real fixes from today, and the page labels them with when they finished ("finished earlier today at" and the time). Barbara (kill, resume, mid-run change) and ken (Alpine) run live.
+Pre-recorded for the demo: the runs of ada, grace, linus and ken are made before the demo so that memory holds real fixes from today, and the page labels them with when they finished ("finished earlier today at" and the time). Only barbara runs live: memory, `kill -9`, resume and the mid-run change. Ken's Alpine run is shown recorded because its compile alone takes nearly 7 minutes.
 
 ## Known limits
 

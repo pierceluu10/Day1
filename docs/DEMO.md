@@ -10,9 +10,9 @@ Every session builds for this run-of-show. If a feature does not appear here or 
 | 2 | `grace` | debian | Training hire. All four fixes found by vector search from ada (similarity 0.92 to 0.95) and adapted, one LLM call each, no reasoning. 3m 54s. Run before the demo. |
 | 3 | `linus` | ubuntu | Run before the demo. All four fixes by exact match from ada, 0 LLM calls, 2m 36s. That second use of each fix opened README issues #10 to #13. |
 | 4 | `barbara` | ubuntu | **Live.** Fixes from memory, killed with `kill -9` mid-run, resumed, then `push_change.sh` lands mid-run. |
-| 5 | `ken` | alpine | **Live (or pre-run and labelled).** Unseen machine: the apt fix is retrieved by vector search and adapted to apk. |
+| 5 | `ken` | alpine | **Pre-recorded** (15:20, labelled "finished earlier today at …"). Unseen machine: ada's apt fix for psycopg2 retrieved by vector search (similarity 0.94) and adapted to apk. 3 errors, 3 from memory, 3 LLM calls (adapting), 0 reasoning. 8m 40s, of which 409 s is psycopg2 compiling on musl, so it cannot run live. |
 
-Hires 1 to 3 were run fresh at 15:15 on `acme-api` c9d8d7f, so the memory in Atlas is real and from today.
+Hires 1 to 3 and ken were run fresh between 15:08 and 15:29 on `acme-api` c9d8d7f, so the memory in Atlas is real and from today. Barbara is the only live hire.
 
 ## Screen layout
 
@@ -24,7 +24,9 @@ Hires 1 to 3 were run fresh at 15:15 on `acme-api` c9d8d7f, so the memory in Atl
 
 Lead with LLM calls, not minutes: 7 → 4 → 0. Same-OS wall time only drops 2m 55s → 2m 36s. That is because installing Python 3.12 and compiling psycopg2 take about 75 s, and a remembered fix still has to do both. Say so if asked; never claim a big speed-up.
 
-## Run-of-show (3 minutes)
+## Run-of-show
+
+Times come from the 15:2x barbara rehearsal: from Start, everything up to the remembered "Python runtime" fix was done when "System packages" got its memory hit at 88 s. Killed there, `dayone resume` reached 13/13 done in 72 s, with every verified step's run count unchanged. `push_change.sh` applies once, so it was not rehearsed; its times come from acceptance test 6: drift detected about 1 s after the push, and the new python-ldap fix by reasoning in about 50 s. Expect about 3.5 minutes from Start to "Tests pass".
 
 `scripts/move_ui.sh` restarts Gitea, so it runs only before Start (never once the agent is past `b_sign_in`: a clone or `ssh -T` during the restart fails). `scripts/restore_ui.sh` undoes it; `scripts/reset.sh` calls it.
 
@@ -32,18 +34,19 @@ Lead with LLM calls, not minutes: 7 → 4 → 0. Same-OS wall time only drops 2m
 
 | Time | What the audience sees (real strings) | Track 3 question | If it goes wrong |
 |---|---|---|---|
-| 0:00 | One sentence: every new hire hits the same broken setup steps and the fix is lost. Preflight fixes that. Point at ada's line: 4 errors, all solved by reasoning, 7 LLM calls. | | |
-| 0:10 | In the terminal tab: `scripts/move_ui.sh` ("we just changed Gitea's SSH-key form"). Gitea restarts for 2 to 3 s; wait for it to return before Start. | Q3 | If Gitea does not answer within 10 s, skip the UI move and say "the form change is shown in the recording". |
-| 0:15 | Type `barbara`, pick ubuntu, Start. Chromium signs in with a green ring (locator from memory). At the key form the saved locator fails: red "This moved.", then amber while it reasons over the page's accessibility text, finds the new fields, adds the key and saves the new locator. | Q3, Q1 | If reasoning takes all 3 attempts, keep talking about why: "it is reading the page, not guessing a selector". |
-| 0:35 | "SSH key added in browser" turns verified only after two independent checks: "API lists key SHA256:…; ssh -T: authenticated as barbara". "acme-api cloned": "local HEAD c9d8d7f = API HEAD c9d8d7f". | Q1 | |
-| 0:45 | "Python runtime" fails: "/root/acme-api/.venv/bin/python is Python 3.10.12, but /root/acme-api/pyproject.toml requires-python = '>=3.12'". Instantly: "exact match from ada, applied N×". No LLM call. The same follows for system packages, settings and database. | memory | |
-| 1:05 | In the terminal tab: `kill -9` the agent mid-step. Page shows the run stopped with one step `pending`. | Q2 | |
-| 1:15 | `dayone resume` (or Resume on the page). Notice: "Resumed: every finished step is re-checked before anything runs." Finished steps show "skipped, not re-run". The pending step is checked first, not blindly re-run. | Q2 | The resume waits up to 11 s for the dead agent's lease: say "it is waiting out the lock the dead process held". |
-| 1:35 | `scripts/push_change.sh` adds python-ldap, which needs another system package. Notice: "Remote HEAD moved c9d8d7f… → ….". "acme-api cloned" and every later step turn stale and are re-verified. The new build error goes to memory, then to reasoning (amber), which installs `libldap2-dev libsasl2-dev` and saves the experience. | Q3 | Fallback: say "the remembered fix did not cover the new package, so it reasons", which is what test 6 showed. |
-| 2:10 | "Tests pass": "14 passed of 14, exit 0 at …". "Welcome checklist ticked": "API issue body: 6/6 items ticked". | | |
-| 2:20 | Switch to `ken` on alpine. The psycopg2 error is retrieved by vector search: "similar error from barbara, similarity 0.94, adapted from ubuntu 22.04, apt: apk add --no-cache postgresql-dev python3-dev build-base musl-dev". | memory, Q3 | If not run live, it is labelled as recorded. |
-| 2:40 | Gitea: the README issues Preflight opened on `acme-api` (#10 to #13), one per snag applied for two or more hires. | closing the loop | These four predate the rename and say "Opened by Day One": "that was its working name"; new issues say Preflight. |
-| 2:50 | One sentence: state in Atlas, verified by independent checks, memory by vector search. | | |
+| 0:00 | One sentence: every new hire hits the same broken setup steps and the fix is lost. Preflight fixes that. Point at ada's recorded line: 4 errors, all solved by reasoning, 7 LLM calls. | | |
+| 0:10 | In the terminal tab: `scripts/move_ui.sh` ("we just changed Gitea's SSH-key form"). Gitea restarts for 2 to 3 s; wait for it to return before Start. | Q3 | If Gitea does not answer within 10 s, skip the UI move and say so. |
+| 0:15 | Type `barbara`, pick ubuntu, Start. "Base tools installed" takes about 30 s (*talk*: the four recorded hires, 7 → 4 → 0 LLM calls on the comparison lines). | | |
+| 0:45 | Chromium signs in with a green ring (locator from memory). At the key form the saved locator fails: red "This moved.", then amber while it reasons over the page's accessibility text, finds the new fields, adds the key and saves the new locator. | Q3, Q1 | If reasoning takes all 3 attempts, keep talking: "it is reading the page, not guessing a selector". |
+| 1:05 | "SSH key added in browser" turns verified only after two independent checks: "API lists key SHA256:…; ssh -T: authenticated as barbara". "acme-api cloned": "local HEAD c9d8d7f = API HEAD c9d8d7f". | Q1 | |
+| 1:10 | "Python runtime" fails: "/root/acme-api/.venv/bin/python is Python 3.10.12, but /root/acme-api/pyproject.toml requires-python = '>=3.12'". At once: "exact match from ada, applied N×", no LLM call. It is fixed from memory about 30 s later. | memory | |
+| 1:45 | "System packages" shows "exact match from ada" (about 88 s after Start). In the terminal tab: `kill -9` the agent. The page shows the run stopped with "System packages" pending. | Q2 | If the kill lands after it is verified, the resume shows everything "skipped, not re-run": that still makes the point. |
+| 1:55 | `dayone resume` (or Resume on the page). Notice: "Resumed: every finished step is re-checked before anything runs." Finished steps show "skipped, not re-run"; their run counts do not change. The pending step is checked first, not blindly re-run. | Q2 | The resume waits up to 11 s for the dead agent's lease: "it is waiting out the lock the dead process held". |
+| 2:05 | Right after resume, while "System packages" is re-checked or building: `scripts/push_change.sh` adds python-ldap, which needs another system package. When the next step starts, the notice reads "Remote HEAD moved c9d8d7f… → …. Downstream steps re-verified." "acme-api cloned" and every later step turn stale. | Q3 | If the notice has not appeared by "Tests pass", the push landed too late: say so and show test 6's recorded drift instead. |
+| 2:10 | The new python-ldap build error goes to memory; the remembered psycopg2 fix does not cover it, so it reasons (amber) and installs `libldap2-dev libsasl2-dev`, then saves the experience. About 50 s, plus the rebuild (*talk*: ken's recorded Alpine line, "similar error from ada, similarity 0.94, adapted from ubuntu 22.04, apt: apk add --no-cache postgresql-dev build-base python3-dev musl-dev"). | Q3, memory | If all 3 attempts fail, the run stops with "System packages" failed: say "it stops rather than claiming success", and show test 6's recorded fix. |
+| 3:15 | "Tests pass": "14 passed of 14, exit 0 at …". "Welcome checklist ticked": "API issue body: 6/6 items ticked". | | |
+| 3:25 | Gitea: the README issues Preflight opened on `acme-api` (#10 to #13), one per snag applied for two or more hires. | closing the loop | These four predate the rename and say "Opened by Day One": "that was its working name"; new issues say Preflight. |
+| 3:40 | One sentence: state in Atlas, verified by independent checks, memory by vector search. | | |
 
 ## Snags in `acme-api` (what the agent must discover; the README mentions none)
 
