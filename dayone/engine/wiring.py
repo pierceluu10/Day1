@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import shutil
 from collections.abc import Iterator
 from contextlib import contextmanager
 
-from dayone.browser.session import PlaywrightSession
+from dayone.browser.session import PROFILE_DIR, PlaywrightSession
 from dayone.config import Settings
 from dayone.contracts import Hire
-from dayone.engine.runner import Parts
+from dayone.engine.runner import Parts, ResetParts
 from dayone.gitea import GiteaClient
 from dayone.llm.anthropic import AnthropicLLM
 from dayone.llm.voyage import VoyageEmbedder
@@ -54,9 +55,21 @@ def open_parts(settings: Settings, store: AtlasStore, hire: Hire) -> Iterator[Pa
         events.close()
 
 
-def remove_container(settings: Settings, store: AtlasStore, hire: Hire) -> None:
-    events = AtlasEventBus(store.db, hire)
-    try:
-        DockerExecutor(hire, events, settings.exec_timeout_s).remove_container()
-    finally:
-        events.close()
+def reset_parts(settings: Settings, store: AtlasStore) -> ResetParts:
+    def remove_container(hire: Hire) -> None:
+        events = AtlasEventBus(store.db, hire)
+        try:
+            DockerExecutor(hire, events, settings.exec_timeout_s).remove_container()
+        finally:
+            events.close()
+
+    def remove_browser_profile(name: str) -> None:
+        profile = PROFILE_DIR / name
+        if profile.exists():
+            shutil.rmtree(profile)
+
+    return ResetParts(
+        reset_gitea=GiteaClient(settings).reset_hire,
+        remove_container=remove_container,
+        remove_browser_profile=remove_browser_profile,
+    )

@@ -103,6 +103,9 @@ class AtlasStore:
             return None
         return Hire(name=name, machine=Machine(doc["machine"]), container=doc["container"], run_id=doc["run_id"])
 
+    def hire_names(self) -> list[str]:
+        return sorted(self._hires.distinct("_id"))
+
     def finish_hire(self, hire: str, ok: bool) -> None:
         self._hires.update_one(
             {"_id": hire}, {"$set": {"status": HIRE_FINISHED if ok else HIRE_FAILED, "finished_at": _now()}}

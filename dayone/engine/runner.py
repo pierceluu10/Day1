@@ -11,6 +11,7 @@ import os
 import socket
 import threading
 import time
+import traceback
 import uuid
 from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager
@@ -23,7 +24,6 @@ from pymongo.errors import PyMongoError
 from dayone.config import settings
 from dayone.contracts import (
     DONE_STATUSES,
-    HIRES,
     REPO,
     REPO_BRANCH,
     REPO_DIR,
@@ -41,6 +41,7 @@ from dayone.contracts import (
     Machine,
     Memory,
     Resolution,
+    RunResult,
     Step,
     StepContext,
     StepStatus,
@@ -48,6 +49,7 @@ from dayone.contracts import (
     container_name,
     idempotency_key,
 )
+from dayone.store.atlas import AtlasStore
 
 log = logging.getLogger(__name__)
 
@@ -100,6 +102,13 @@ class Parts:
 
 
 OpenParts = Callable[[Hire], AbstractContextManager[Parts]]
+
+
+@dataclass(frozen=True)
+class ResetParts:
+    reset_gitea: Callable[[str], None]  # delete the hire's SSH keys, untick their Welcome issue
+    remove_container: Callable[[Hire], None]
+    remove_browser_profile: Callable[[str], None]  # the saved sign-in would otherwise pass b_sign_in unrun
 
 
 class Lease:
@@ -162,19 +171,37 @@ def run_hire(name: str, machine: Machine | None, resume: bool) -> bool:
 
 
 def reset(name: str | None) -> None:
-    """Forget a hire (or every hire): its container, steps, events and hire doc. Experiences are kept."""
+    """Return a hire (or every hire in Atlas) to day zero. Experiences are kept: they are the point."""
     from dayone.engine import wiring
 
     config = settings()
     with wiring.open_store(config) as store:
-        for hire_name in [name] if name else list(HIRES):
-            owner = f"reset:{os.getpid()}"
-            if not store.acquire_lease(hire_name, owner, LEASE_TTL_S):
-                raise LeaseHeld(f"{hire_name} is being run; stop it before resetting")
-            hire = store.get_hire(hire_name)
-            if hire is not None:
-                wiring.remove_container(config, store, hire)
-            store.reset_hire(hire_name)  # deletes the hire doc, and with it the lease
+        reset_hires(store, name, wiring.reset_parts(config, store))
+
+
+def reset_hires(store: AtlasStore, name: str | None, parts: ResetParts) -> list[str]:
+    """Gitea keys and Welcome ticks, browser profile, container, then the Atlas ledger,
+    so the next run's checks fail before they pass.
+
+    Every lease is taken before anything is touched: a hire that is being run makes the whole reset refuse.
+    """
+    names = [name] if name else store.hire_names()
+    owner = f"reset:{socket.gethostname()}:{os.getpid()}"
+    taken: list[str] = []
+    for hire_name in names:
+        if not store.acquire_lease(hire_name, owner, LEASE_TTL_S):
+            for held in taken:
+                store.release_lease(held, owner)
+            raise LeaseHeld(f"{hire_name} is being run; stop it before resetting")
+        taken.append(hire_name)
+    for hire_name in names:
+        parts.reset_gitea(hire_name)
+        parts.remove_browser_profile(hire_name)
+        hire = store.get_hire(hire_name)
+        if hire is not None:  # no hire doc means the engine never created a container for it
+            parts.remove_container(hire)
+        store.reset_hire(hire_name)  # deletes the hire doc, and with it the lease
+    return names
 
 
 def drive(store: Store, name: str, machine: Machine | None, resume: bool, open_parts: OpenParts) -> bool:
@@ -297,13 +324,15 @@ class Run:
             return True
 
         self._intend(step)
-        ran = step.run(self._context(step))
+        ran, raised = self._run(step)
         check = self._check(step)
         if check.ok:
             self._finish(step, StepStatus.VERIFIED, check, None, reconciled=False)
             return True
 
-        return self._repair(step, check.error_text or ran.output or check.evidence)
+        # An exception from run() is the most specific account of what went wrong, so it leads.
+        error_text = ran.output if raised else check.error_text or ran.output or check.evidence
+        return self._repair(step, error_text)
 
     def _repair(self, step: Step, error_text: str) -> bool:
         fingerprint = self.parts.fingerprint(error_text)
@@ -341,7 +370,7 @@ class Run:
                 failed = CheckResult(ok=False, evidence=f"fix command failed: {command}", error_text=result.output)
                 self.store.record_check(self.hire.name, step.id, failed)
                 return failed
-        step.run(self._context(step))
+        self._run(step)
         return self._check(step)
 
     def _intend(self, step: Step) -> None:
@@ -349,8 +378,21 @@ class Run:
         record = self.store.mark_pending(self.hire.name, step.id, key)
         self.events.emit(EventType.STEP_PENDING, step.id, run_count=record.run_count, idempotency_key=key)
 
+    def _run(self, step: Step) -> tuple[RunResult, bool]:
+        """run() at the step boundary; an exception is a failed run whose message is the error. True if raised."""
+        try:
+            return step.run(self._context(step)), False
+        # Broad on purpose: steps call Playwright, Docker and HTTP, and any failure there must reach repair.
+        except Exception as error:  # noqa: BLE001
+            return RunResult(ok=False, output=self._raised(step, "run", error)), True
+
     def _check(self, step: Step) -> CheckResult:
-        check = step.check(self._context(step))
+        try:
+            check = step.check(self._context(step))
+        # Broad on purpose: steps call Playwright, Docker and HTTP; a check that cannot run has not passed.
+        except Exception as error:  # noqa: BLE001
+            text = self._raised(step, "check", error)
+            check = CheckResult(ok=False, evidence=f"check raised {type(error).__name__}", error_text=text)
         self.store.record_check(self.hire.name, step.id, check)
         self.events.emit(
             EventType.STEP_CHECK_RESULT, step.id, ok=check.ok, evidence=check.evidence, detail=check.detail
@@ -358,6 +400,13 @@ class Run:
         if check.ok and step.id == CLONE_STEP:
             self.clone_head = check.detail[CLONE_HEAD_KEY]
         return check
+
+    def _raised(self, step: Step, phase: str, error: Exception) -> str:
+        log.warning("%s.%s() raised", step.id, phase, exc_info=error)
+        text = f"{type(error).__name__}: {error}"
+        trace = "".join(traceback.format_exception(error))
+        self.events.emit(EventType.TERMINAL_OUTPUT, step.id, command=f"{step.id}.{phase}()", chunk=trace)
+        return text
 
     def _finish(
         self, step: Step, status: StepStatus, check: CheckResult, resolution: Resolution | None, reconciled: bool
