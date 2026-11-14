@@ -15,7 +15,7 @@ import uuid
 import pytest
 from pymongo import MongoClient
 
-from dayone.browser.locators import KEYS_OPEN_FORM
+from dayone.browser.locators import KEYS_OPEN_FORM, SEED_SOURCE
 from dayone.browser.session import PROFILE_DIR, PlaywrightSession
 from dayone.config import settings
 from dayone.contracts import EventType, Hire, LocatorHint, Machine, StepContext, StepKind, idempotency_key
@@ -28,6 +28,12 @@ from conftest import HIRE, DockerExec, RecordingEvents
 from test_browser_steps import reconcile
 
 STALE_LOCATOR = "#add-ssh-key-button-v1"  # what the keys page used to call its button
+# Stands in for scripts/move_ui.sh: the add-key button loses the id the hand-found seed relies on, so the
+# stale memory and the seed both fail and only reasoning can find it.
+MOVE_UI_JS = """document.addEventListener('DOMContentLoaded', () => {
+    const button = document.querySelector('#add-ssh-button');
+    if (button) button.id = 'ssh-add-key-v2';
+})"""
 STALE_SOURCE = "ada"
 KEYS_PAGE_SUMMARY = "SSH / GPG Keys - Gitea: Git with a cup of tea (/user/settings/keys)"
 STALE_BBOX = (1277.0, 71.0, 69.0, 32.0)
@@ -86,6 +92,7 @@ def test_stale_saved_locator_is_reasoned_saved_and_reused(clean_linus, db, memor
         events = AtlasEventBus(db, hire)
         browser = PlaywrightSession(hire, dataclasses.replace(settings(), browser_headless=True), events, memory, llm)
         browsers.append(browser)
+        browser.page.context.add_init_script(MOVE_UI_JS)
         nonlocal shots
         shots = screenshots(browser)  # the same list for every browser in this test
         return StepContext(hire, "b_sign_in", "", DockerExec(container), browser, gitea, events, memory)
@@ -95,9 +102,10 @@ def test_stale_saved_locator_is_reasoned_saved_and_reused(clean_linus, db, memor
         run_add_ssh_key(make_ssh_context, first_run)
         first = locator_events(db, first_run)
         print("run 1 events:", first)
-        assert [event["mode"] for event in first] == ["moved", "reasoning"]
+        assert [event["mode"] for event in first] == ["moved", "moved", "reasoning"]
         assert first[0]["locator"] == STALE_LOCATOR and first[0]["source_hire"] == STALE_SOURCE
-        learned = first[1]["locator"]
+        assert first[1]["source_hire"] == SEED_SOURCE
+        learned = first[2]["locator"]
         reasoning_calls = llm.calls
         run1_shot_count = len(shots)
         assert reasoning_calls >= 1
@@ -120,7 +128,7 @@ def test_stale_saved_locator_is_reasoned_saved_and_reused(clean_linus, db, memor
         assert llm.calls == reasoning_calls, "the second run called the LLM for a locator it had already learned"
         print("screenshots:", "\n".join(shots))
         run1_shots, run2_shots = shots[:run1_shot_count], shots[run1_shot_count:]
-        assert [path.rsplit("-", 1)[1] for path in run1_shots].count("moved.png") == 1
+        assert [path.rsplit("-", 1)[1] for path in run1_shots].count("moved.png") == 2
         assert [path.rsplit("-", 1)[1] for path in run1_shots].count("reasoning.png") == 1
         assert all(path.endswith("-memory.png") for path in run2_shots)
     finally:

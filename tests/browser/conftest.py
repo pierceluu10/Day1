@@ -128,6 +128,9 @@ def clean_linus(gitea, container):
     issue = gitea.welcome_issue(HIRE)
     gitea.request("PATCH", f"/repos/acme/acme-api/issues/{issue['number']}",
                   json={"body": issue["body"].replace("- [x] ", "- [ ] ")})
+    for thread in gitea.request("GET", "/notifications", params={"all": "true", "sudo": HIRE, "limit": 50}):
+        if thread["subject"]["html_url"].endswith(f"/issues/{issue['number']}") and not thread["unread"]:
+            gitea.request("PATCH", f"/notifications/threads/{thread['id']}", params={"to-status": "unread", "sudo": HIRE})
     shutil.rmtree(PROFILE_DIR / HIRE, ignore_errors=True)
     DockerExec(container).exec("rm -rf /root/acme-api ~/.ssh/known_hosts", 30)
 
