@@ -66,6 +66,7 @@ def test_failure_is_fixed_from_memory_and_verified(store: AtlasStore, tmp_path: 
     assert record.run_count == 3, "first run + one per fix attempt, each with intent written first"
     doc = store.db["steps"].find_one({"hire": "fixer", "step_id": STEP_ID})
     assert doc["check_ever_failed"] and not doc["untrusted"]
+    assert doc["llm_calls"] == 0
     assert browser.ticked == [WELCOME_CHECKLIST[STEP_ID]]
     print("executor commands:", executor.commands)
 

@@ -271,6 +271,10 @@ class Run:
     def _mark_stale_from(self, step_id: str, reason: str) -> None:
         later = [step.id for step in self.parts.steps[self._index(step_id) :]]
         self.store.mark_stale(self.hire.name, later, reason)
+        for stale in later:
+            self.events.emit(
+                EventType.STEP_STATUS, stale, status=StepStatus.STALE.value, evidence=reason, reconciled=False
+            )
         if CLONE_STEP in later:
             self.clone_head = None
 

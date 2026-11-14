@@ -69,6 +69,8 @@ def test_remote_head_moving_restarts_from_clone(store: AtlasStore, tmp_path: Pat
     print("drift events:", [event["data"] for event in drift])
     assert [event["data"] for event in drift] == [{"from": old_head, "to": NEW_HEAD}]
     assert drift[0]["step_id"] == "s_tests"
+    stale_events = store.db["events"].find({"hire": "drift", "type": "step_status", "data.status": "stale"})
+    assert sorted(event["step_id"] for event in stale_events) == sorted([CLONE_STEP, "s_deps", "s_tests"])
 
     ledger = store.steps("drift")
     assert ledger[CLONE_STEP].status == StepStatus.VERIFIED and ledger[CLONE_STEP].run_count == 2

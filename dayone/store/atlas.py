@@ -168,6 +168,7 @@ class AtlasStore:
             "evidence_detail": check.detail,
             "fix_source": proposal.source.value if proposal else None,
             "experience_id": proposal.experience_id if proposal else None,
+            "llm_calls": resolution.llm_calls if resolution else 0,
             "updated_at": _now(),
         }
         # Pipeline update so `untrusted` is computed from the stored flag in the same single-document write;
