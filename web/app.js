@@ -294,6 +294,7 @@ function setNote(stepId, text, kind) {
 function memoryNote(data) {
   const parts = [`${SOURCE_WORDS[data.source] ?? data.source} from ${data.source_hire ?? "memory"}`];
   if (data.similarity != null) parts.push(`similarity ${Number(data.similarity).toFixed(2)}`);
+  if (data.uses) parts.push(`applied ${data.uses}×`);
   if (data.adapted_from) parts.push(`adapted from ${data.adapted_from}: ${data.commands.join(" && ")}`);
   return parts.join(", ");
 }
@@ -333,8 +334,12 @@ function applyEvent(event) {
       setNote(stepId, memoryNote(data), "memory");
       break;
     case "memory_miss":
-    case "reasoning_started":
       setNote(stepId, "no fix in memory, reasoning", "reasoning");
+      break;
+    case "reasoning_started":
+      // The browser reasons about a page element (data.goal); memory reasons about a failed step.
+      if (data.goal) setNote(stepId, `${data.goal}: finding it by reasoning`, "locating");
+      else setNote(stepId, "no fix in memory, reasoning", "reasoning");
       break;
     case "fix_attempt":
       if (data.source === "reasoning") {
