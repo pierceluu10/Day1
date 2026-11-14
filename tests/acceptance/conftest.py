@@ -1,4 +1,4 @@
-"""Session fixtures: a dropped `dayone_acceptance` database, the Gitea API, and real onboarding runs."""
+"""Session fixtures: an emptied `dayone_acceptance` database, the Gitea API, and real onboarding runs."""
 
 from __future__ import annotations
 
@@ -38,11 +38,13 @@ def hires(request: pytest.FixtureRequest) -> dict[str, str]:
 @pytest.fixture(scope="session")
 def db(acceptance_db_name: str) -> Iterator[Database]:
     configured = settings().mongodb_db
-    assert configured == acceptance_db_name, f"refusing to drop {configured!r}; run with --acceptance"
+    assert configured == acceptance_db_name, f"refusing to empty {configured!r}; run with --acceptance"
     client: MongoClient = MongoClient(settings().mongodb_uri)
-    client.drop_database(acceptance_db_name)
-    print(f"dropped Atlas database {acceptance_db_name}")
-    yield client[acceptance_db_name]
+    db = client[acceptance_db_name]
+    # The hackathon user may not dropDatabase; emptying collections also keeps the vector index built.
+    for name in db.list_collection_names():
+        print(f"emptied {acceptance_db_name}.{name}: {db[name].delete_many({}).deleted_count} documents")
+    yield db
     client.close()
 
 
