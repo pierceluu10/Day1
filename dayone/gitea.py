@@ -7,7 +7,7 @@ from typing import Any
 import httpx
 
 from dayone.config import GITEA_TOKEN_FILE, Settings
-from dayone.contracts import REPO, WELCOME_ISSUE_TITLE
+from dayone.contracts import REPO, WELCOME_CHECKLIST, WELCOME_ISSUE_TITLE
 
 API_PREFIX = "/api/v1"
 REQUEST_TIMEOUT_S = 15.0
@@ -36,6 +36,12 @@ class GiteaTokenMissing(RuntimeError):
 
 class GiteaUnreachable(RuntimeError):
     pass
+
+
+def welcome_body() -> str:
+    """The seeded Welcome issue body: every WELCOME_CHECKLIST item, in order, unticked."""
+    items = "\n".join(f"- [ ] {item}" for item in WELCOME_CHECKLIST.values())
+    return f"Welcome to the engineering team! Work through this list on your first day.\n\n{items}\n"
 
 
 def read_admin_token() -> str:
@@ -78,11 +84,10 @@ class GiteaClient:
         return self.request("GET", f"/repos/{repo}/branches/{branch}")["commit"]["id"]
 
     def find_issue(self, repo: str, title: str) -> dict[str, Any] | None:
+        # No `q=` filter: Gitea's issue indexer is asynchronous and misses issues created a moment ago.
         page = 1
         while issues := self.request(
-            "GET",
-            f"/repos/{repo}/issues",
-            params={"state": "all", "type": "issues", "q": title, "limit": PAGE_LIMIT, "page": page},
+            "GET", f"/repos/{repo}/issues", params={"state": "all", "type": "issues", "limit": PAGE_LIMIT, "page": page}
         ):
             for issue in issues:
                 if issue["title"] == title:
@@ -94,8 +99,15 @@ class GiteaClient:
         title = WELCOME_ISSUE_TITLE.format(hire=username)
         issue = self.find_issue(REPO, title)
         if issue is None:
-            raise GiteaNotFound("GET", f"/repos/{REPO}/issues?q={title}", HTTP_NOT_FOUND, "no such issue")
+            raise GiteaNotFound("GET", f"/repos/{REPO}/issues", HTTP_NOT_FOUND, f"no issue titled {title!r}")
         return issue
 
     def create_issue(self, repo: str, title: str, body: str) -> dict[str, Any]:
         return self.request("POST", f"/repos/{repo}/issues", json={"title": title, "body": body})
+
+    def reset_hire(self, username: str) -> None:
+        """Back to the seeded state for one hire: no SSH keys, Welcome issue open with every item unticked."""
+        for key in self.user_keys(username):
+            self.request("DELETE", f"/admin/users/{username}/keys/{key['id']}")
+        issue = self.welcome_issue(username)
+        self.request("PATCH", f"/repos/{REPO}/issues/{issue['number']}", json={"body": welcome_body(), "state": "open"})
