@@ -102,7 +102,7 @@ uv run python -u -m pytest --acceptance tests/acceptance -v -s     # real contai
 | 2 | `kill -9` at five live points, then resume: nothing verified re-runs, pending is checked first, final state equals a clean run | pass |
 | 3 | SSH key verified only when the API lists it and `ssh -T` succeeds | pass |
 | 4 | Hire 2 hits hire 1's errors and fixes each from exact memory with 0 LLM calls, and is faster | pass |
-| 5 | Alpine: an `apt` install retrieved semantically and adapted to `apk`; distro-independent fixes carry over unchanged | pass (assertions evaluated on the recorded run, see below) |
+| 5 | Alpine: an `apt` install retrieved semantically and adapted to `apk`; distro-independent fixes carry over unchanged | pass on the 15:20 run's Atlas data; that pytest run failed on a test bug, fixed in 302cf6b |
 | 6 | `push_change.sh` mid-run: drift detected, downstream re-verified, new error fixed, all tests pass | pass |
 | 7 | Every number the API serves equals a direct Atlas query | pass |
 | 8 | No `.env` value or common key format in any commit; `.env` ignored and never tracked | pass |
