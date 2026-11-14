@@ -1,0 +1,8 @@
+# Copy to settings.toml and adjust for your machine.
+
+[app]
+name = "acme-api"
+
+[database]
+# sqlite:///<path relative to the repo root>, or postgresql://user:password@host/dbname
+url = "sqlite:///acme.db"
