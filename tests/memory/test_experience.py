@@ -236,22 +236,23 @@ def test_close_loop_opens_one_issue_per_repeated_fix_and_is_idempotent(harness):
     assert "ada, linus, barbara" in issue["body"] and "libpq-dev" in issue["body"] and PASSED.evidence in issue["body"]
 
 
-def test_locator_exact_goal_then_semantic_page_match(harness):
+def test_locator_is_only_ever_returned_for_its_own_goal(harness):
     memory, _, _, _, experiences = harness
-    goal = "ssh key form: title field"
-    summary = "Gitea user settings, SSH / GPG Keys page: Manage SSH Keys, Add Key button, Key Name input, Content textarea"
-    memory.save_locator(LocatorHint(goal, "#ssh-key-title", (10.0, 20.0, 300.0, 32.0), summary, None, None), "ada")
-    memory.save_locator(LocatorHint(goal, "#ssh-key-title", (10.0, 20.0, 300.0, 32.0), summary, None, None), "grace")
+    summary = "Gitea sign-in page: Username or Email Address input, Password input, Remember This Device checkbox"
+    username = "sign-in page: username field"
+    memory.save_locator(LocatorHint(username, "#user_name", (10.0, 20.0, 300.0, 32.0), summary, None, None), "ada")
+    memory.save_locator(LocatorHint(username, "#user_name", (10.0, 20.0, 300.0, 32.0), summary, None, None), "grace")
 
-    exact = memory.find_locator(goal, summary)
-    assert exact.locator == "#ssh-key-title" and exact.source_hire == "ada" and exact.similarity is None
+    found = memory.find_locator(username, summary)
+    assert found.locator == "#user_name" and found.source_hire == "ada" and found.similarity is None
     saved = experiences.find_one({"kind": "browser"})
     assert saved["uses"] == 2 and saved["hires"] == ["ada", "grace"]
 
-    wait_until_searchable(experiences, 1)
-    reworded = memory.find_locator("ssh key form: key name input", summary)
-    assert reworded is not None and reworded.locator == "#ssh-key-title"
-    assert reworded.similarity >= SEMANTIC_MIN_SIMILARITY
+    # The integrated ada run crashed here: a semantic hit gave the checkbox goal the username input.
+    assert memory.find_locator("sign-in page: remember this device checkbox", summary) is None
+
+    memory.save_locator(LocatorHint(username, "#login-name", None, "redesigned " + summary, None, None), "linus")
+    assert memory.find_locator(username, summary).locator == "#login-name", "the newest working locator wins"
 
 
 def test_guard_makes_model_commands_runnable_unattended():
