@@ -8,7 +8,7 @@ from contextlib import contextmanager
 
 from dayone.browser.session import PROFILE_DIR, PlaywrightSession
 from dayone.config import Settings
-from dayone.contracts import Hire
+from dayone.contracts import Hire, Machine, container_name
 from dayone.engine.runner import Parts, ResetParts
 from dayone.gitea import GiteaClient
 from dayone.llm.anthropic import AnthropicLLM
@@ -19,6 +19,8 @@ from dayone.store.atlas import AtlasStore
 from dayone.store.events import AtlasEventBus
 from dayone.terminal.docker import DockerExecutor
 from dayone.terminal.fingerprint import fingerprint
+
+RESET_RUN_ID = "reset"
 
 
 @contextmanager
@@ -56,7 +58,9 @@ def open_parts(settings: Settings, store: AtlasStore, hire: Hire) -> Iterator[Pa
 
 
 def reset_parts(settings: Settings, store: AtlasStore) -> ResetParts:
-    def remove_container(hire: Hire) -> None:
+    def remove_container(name: str) -> None:
+        # Removal only uses the container name; the machine matters only when creating one.
+        hire = store.get_hire(name) or Hire(name, Machine.UBUNTU, container_name(name), run_id=RESET_RUN_ID)
         events = AtlasEventBus(store.db, hire)
         try:
             DockerExecutor(hire, events, settings.exec_timeout_s).remove_container()

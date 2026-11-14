@@ -108,7 +108,7 @@ OpenParts = Callable[[Hire], AbstractContextManager[Parts]]
 @dataclass(frozen=True)
 class ResetParts:
     reset_gitea: Callable[[str], None]  # delete the hire's SSH keys, untick their Welcome issue
-    remove_container: Callable[[Hire], None]
+    remove_container: Callable[[str], None]  # by hire name: a container may outlive its Atlas doc (another DB)
     remove_browser_profile: Callable[[str], None]  # the saved sign-in would otherwise pass b_sign_in unrun
 
 
@@ -198,9 +198,7 @@ def reset_hires(store: AtlasStore, name: str | None, parts: ResetParts) -> list[
     for hire_name in names:
         parts.reset_gitea(hire_name)
         parts.remove_browser_profile(hire_name)
-        hire = store.get_hire(hire_name)
-        if hire is not None:  # no hire doc means the engine never created a container for it
-            parts.remove_container(hire)
+        parts.remove_container(hire_name)
         store.reset_hire(hire_name)  # deletes the hire doc, and with it the lease
     return names
 

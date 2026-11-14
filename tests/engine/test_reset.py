@@ -19,7 +19,7 @@ class Recorder:
     def parts(self) -> ResetParts:
         return ResetParts(
             reset_gitea=self.gitea.append,
-            remove_container=lambda hire: self.containers.append(hire.container),
+            remove_container=lambda name: self.containers.append(container_name(name)),
             remove_browser_profile=self.profiles.append,
         )
 
@@ -63,10 +63,11 @@ def test_reset_all_covers_every_hire_in_atlas(store: AtlasStore) -> None:
     assert _left(store, "ada") == _left(store, "ken") == (0, 0, 0)
 
 
-def test_hire_without_atlas_doc_still_gets_gitea_reset(store: AtlasStore) -> None:
+def test_hire_without_atlas_doc_is_still_fully_reset(store: AtlasStore) -> None:
+    # e.g. a container another session created from its own dev database
     recorder = Recorder()
     reset_hires(store, "linus", recorder.parts())
-    assert recorder.gitea == ["linus"] and recorder.profiles == ["linus"] and recorder.containers == []
+    assert recorder.gitea == ["linus"] and recorder.profiles == ["linus"] and recorder.containers == ["dayone-linus"]
     assert _left(store, "linus") == (0, 0, 0)
 
 
