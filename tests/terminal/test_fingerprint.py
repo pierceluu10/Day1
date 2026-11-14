@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pytest
 
+from dayone.contracts import REPO_DIR, ExecResult, Hire, Machine, StepContext
+from dayone.steps.terminal_steps import VENV_PYTHON, check_init_db, check_settings, check_system_package
 from dayone.terminal.fingerprint import fingerprint, normalise
 
 ERRORS = Path(__file__).parent / "errors"
@@ -63,3 +65,31 @@ def test_text_without_error_lines_is_fingerprinted_whole():
     assert normalise("ssh: connect to host gitea port 22: Connection refused") == (
         "ssh: connect to host gitea port <n>: Connection refused"
     )
+
+
+class ReplayExecutor:
+    """Answers every command with one captured output, so a real check builds its error_text from it."""
+
+    def __init__(self, output: str) -> None:
+        self.output = output
+
+    def exec(self, command, timeout_s, workdir=None):
+        return ExecResult(command, 1, self.output, 0.1)
+
+
+@pytest.mark.parametrize(
+    ("step", "check"),
+    [("t_system_package", check_system_package), ("t_settings", check_settings), ("t_init_db", check_init_db)],
+)
+def test_check_error_text_leads_with_the_command_and_still_matches_across_machines(step, check):
+    def failing(machine):
+        executor = ReplayExecutor(_error(f"{machine}_{step}.txt"))
+        ctx = StepContext(Hire("grace", machine, "dayone-grace", "r"), step, "k", executor, None, None, None, None)
+        return check(ctx)
+
+    ubuntu, alpine = failing(Machine.UBUNTU), failing(Machine.ALPINE)
+    print(ubuntu.error_text.splitlines()[0])
+    assert not ubuntu.ok
+    command = ubuntu.error_text.splitlines()[0]
+    assert command.startswith(f"$ cd {REPO_DIR} && ") and f"{VENV_PYTHON} " in command
+    assert fingerprint(ubuntu.error_text) == fingerprint(alpine.error_text)

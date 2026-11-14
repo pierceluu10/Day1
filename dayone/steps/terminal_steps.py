@@ -26,12 +26,12 @@ from dayone.contracts import (
     StepContext,
     StepKind,
 )
+from dayone.terminal.docker import error_text
 from dayone.terminal.ssh import SSH_OPTIONS
 
 QUICK_TIMEOUT_S = 60.0
 INSTALL_TIMEOUT_S = 900.0
 TEST_TIMEOUT_S = 300.0
-ERROR_TAIL_LINES = 40
 SHORT_SHA = 7
 
 VENV_DIR = f"{REPO_DIR}/.venv"
@@ -56,16 +56,13 @@ class UnsupportedSpecifier(ValueError):
     pass
 
 
-def _tail(output: str) -> str:
-    return "\n".join(output.strip().splitlines()[-ERROR_TAIL_LINES:])
-
-
 def _exec(ctx: StepContext, command: str, timeout_s: float = QUICK_TIMEOUT_S, workdir: str | None = None) -> ExecResult:
     return ctx.executor.exec(command, timeout_s, workdir)
 
 
-def _failed(evidence: str, result: ExecResult, **detail: object) -> CheckResult:
-    return CheckResult(False, evidence, {"exit_code": result.exit_code, **detail}, _tail(result.output))
+def _failed(evidence: str, result: ExecResult, workdir: str | None = None, message: str = "", **detail: object) -> CheckResult:
+    detail = {"exit_code": result.exit_code, **detail}
+    return CheckResult(False, evidence, detail, error_text(result, workdir, message))
 
 
 def _shell_run(command: str, timeout_s: float = INSTALL_TIMEOUT_S, workdir: str | None = None) -> Callable[[StepContext], RunResult]:
@@ -159,8 +156,8 @@ def check_clone(ctx: StepContext) -> CheckResult:
     detail = {"head": api_head, "local_head": local_head}
     if local_head != api_head:
         evidence = f"local HEAD {local_head[:SHORT_SHA]} ≠ API HEAD {api_head[:SHORT_SHA]}"
-        error = f"{REPO_DIR} is at {local_head} but {REPO} {REPO_BRANCH} is at {api_head}"
-        return CheckResult(False, evidence, detail, error)
+        message = f"{REPO_DIR} is at {local_head} but {REPO} {REPO_BRANCH} is at {api_head}"
+        return _failed(evidence, result, message=message, **detail)
     return CheckResult(True, f"local HEAD {local_head[:SHORT_SHA]} = API HEAD {api_head[:SHORT_SHA]}", detail)
 
 
@@ -178,8 +175,8 @@ def check_runtime(ctx: StepContext) -> CheckResult:
     version = probe.output.strip()
     detail = {"python": version, "requires_python": required}
     if not satisfies(version, required):
-        error = f"{VENV_PYTHON} is Python {version}, but {REPO_DIR}/pyproject.toml requires-python = '{required}'"
-        return CheckResult(False, f"venv Python {version} does not satisfy {required}", detail, error)
+        message = f"{VENV_PYTHON} is Python {version}, but {REPO_DIR}/pyproject.toml requires-python = '{required}'"
+        return _failed(f"venv Python {version} does not satisfy {required}", probe, message=message, **detail)
     return CheckResult(True, f"venv Python {version} satisfies {required}", detail)
 
 
@@ -191,7 +188,7 @@ def check_system_package(ctx: StepContext) -> CheckResult:
     command = f"rm -rf {WHEEL_DIR} && {VENV_PYTHON} -m pip wheel -r requirements.txt -w {WHEEL_DIR}"
     result = _exec(ctx, command, INSTALL_TIMEOUT_S, REPO_DIR)
     if not result.ok:
-        return _failed("native dependencies do not build", result)
+        return _failed("native dependencies do not build", result, REPO_DIR)
     wheels = _exec(ctx, f"ls {WHEEL_DIR}").output.split()
     return CheckResult(True, f"{len(wheels)} wheels built, native deps compile", {"wheels": wheels})
 
@@ -207,7 +204,7 @@ def check_install_deps(ctx: StepContext) -> CheckResult:
     )
     result = _exec(ctx, command, QUICK_TIMEOUT_S, REPO_DIR)
     if not result.ok:
-        return _failed("dependencies not importable", result)
+        return _failed("dependencies not importable", result, REPO_DIR)
     *_, psycopg2_version, count = result.output.split()
     detail = {"psycopg2": psycopg2_version, "packages": int(count)}
     return CheckResult(True, f"pip check ok, {count} packages, psycopg2 {psycopg2_version}", detail)
@@ -220,7 +217,7 @@ def check_settings(ctx: StepContext) -> CheckResult:
     command = f"{VENV_PYTHON} -c 'from acme_api.settings import settings; print(settings().database_url)'"
     result = _exec(ctx, command, QUICK_TIMEOUT_S, REPO_DIR)
     if not result.ok:
-        return _failed("settings do not load", result)
+        return _failed("settings do not load", result, REPO_DIR)
     url = result.output.strip()
     return CheckResult(True, f"settings load, database {url}", {"database_url": url})
 
@@ -235,7 +232,7 @@ with db.connection() as conn:
 def check_init_db(ctx: StepContext) -> CheckResult:
     result = _exec(ctx, f"{VENV_PYTHON} -c {shlex.quote(COUNT_USERS)}", QUICK_TIMEOUT_S, REPO_DIR)
     if not result.ok:
-        return _failed("database schema missing", result)
+        return _failed("database schema missing", result, REPO_DIR)
     rows = int(result.output.split()[-1])
     return CheckResult(True, f"users table present ({rows} rows)", {"users": rows})
 
@@ -248,7 +245,7 @@ def check_run_tests(ctx: StepContext) -> CheckResult:
     result = _exec(ctx, command, TEST_TIMEOUT_S, REPO_DIR)
     report = _exec(ctx, f"cat {JUNIT_PATH}")
     if not report.ok:
-        return _failed(f"pytest wrote no report, exit {result.exit_code}", result)
+        return _failed(f"pytest wrote no report, exit {result.exit_code}", result, REPO_DIR)
     suite = ElementTree.fromstring(report.output)
     suite = suite if suite.tag == "testsuite" else suite.find("testsuite")
     collected = int(suite.get("tests", 0))
@@ -257,7 +254,7 @@ def check_run_tests(ctx: StepContext) -> CheckResult:
     detail = {"collected": collected, "passed": passed, "exit_code": result.exit_code}
     evidence = f"{passed} passed of {collected}, exit {result.exit_code}"
     if result.exit_code != 0 or collected == 0 or passed != collected:
-        return CheckResult(False, evidence, detail, _tail(result.output))
+        return _failed(evidence, result, REPO_DIR, **detail)
     return CheckResult(True, f"{passed} passed, exit 0", detail)
 
 
