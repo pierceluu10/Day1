@@ -59,9 +59,6 @@ const view = {
   summary: null,
   source: null,
   refreshTimer: null,
-  // Atlas replies can arrive out of order: apply a refresh only if it started after the last one applied.
-  refreshTicket: 0,
-  appliedTicket: 0,
   tickTimer: null,
   lastCommand: null,
 };
@@ -104,56 +101,50 @@ function renderHires(hires) {
 }
 
 function stepRow(stepId) {
-  const doc = view.steps.get(stepId) ?? { status: "not_started", run_count: 0 };
-  const note = view.notes.get(stepId);
-  const showNote = note && !(DONE_STATUSES.has(doc.status) && TRANSIENT_NOTES.has(note.kind));
   const row = document.createElement("li");
   row.className = "step";
   row.dataset.step = stepId;
-  const reconciled = view.reconciled.has(stepId) && DONE_STATUSES.has(doc.status);
-  row.dataset.status = reconciled ? "skipped" : doc.status;
-  if (view.checking.has(stepId)) row.dataset.checking = "";
-
-  const title = document.createElement("span");
-  title.className = "step-title";
-  title.textContent = STEP_TITLES[stepId] ?? stepId;
-
-  const status = document.createElement("span");
-  status.className = "step-status";
-  status.textContent = view.checking.has(stepId) ? "checking" : STATUS_WORDS[row.dataset.status] ?? doc.status;
-
-  const line = document.createElement("span");
-  line.className = "step-line";
-  line.textContent = doc.evidence || "";
-
-  const runs = document.createElement("span");
-  runs.className = "step-runs";
-  // Only a repeat is worth reading: every step should run at most once per hire.
-  runs.textContent = doc.run_count > 1 ? `ran ${doc.run_count}×` : "";
-
-  row.append(title, status, line, runs);
-  if (showNote) {
-    const noteLine = document.createElement("span");
-    noteLine.className = "step-note";
-    noteLine.dataset.kind = note.kind;
-    noteLine.textContent = note.text;
-    row.append(noteLine);
-  }
+  const parts = ["step-title", "step-status", "step-line", "step-runs", "step-note"].map((className) => {
+    const part = document.createElement("span");
+    part.className = className;
+    return part;
+  });
+  parts[0].textContent = STEP_TITLES[stepId] ?? stepId;
+  row.append(...parts);
   return row;
 }
 
-function renderSteps(previous) {
-  const list = $("steps");
-  list.replaceChildren(...view.stepOrder.map(stepRow));
-  if (!previous) return;
-  for (const row of list.children) {
-    const before = previous.get(row.dataset.step)?.status;
-    if (before && before !== row.dataset.status) {
-      row.dataset.changed = "";
-      // Two frames so the wash paints before the fade-out transition starts.
-      setTimeout(() => requestAnimationFrame(() => row.removeAttribute("data-changed")), CHANGED_HIGHLIGHT_MS);
-    }
+function updateRow(row, highlight) {
+  const stepId = row.dataset.step;
+  const doc = view.steps.get(stepId) ?? { status: "not_started", run_count: 0 };
+  const reconciled = view.reconciled.has(stepId) && DONE_STATUSES.has(doc.status);
+  const shown = reconciled ? "skipped" : doc.status;
+  if (highlight && row.dataset.status && row.dataset.status !== shown) {
+    // The row is reused, so the wash fades out through the .step transition once the attribute goes.
+    row.dataset.changed = "";
+    clearTimeout(row.changedTimer);
+    row.changedTimer = setTimeout(() => row.removeAttribute("data-changed"), CHANGED_HIGHLIGHT_MS);
   }
+  row.dataset.status = shown;
+  row.toggleAttribute("data-checking", view.checking.has(stepId));
+
+  const [, status, line, runs, noteLine] = row.children;
+  status.textContent = view.checking.has(stepId) ? "checking" : STATUS_WORDS[shown] ?? shown;
+  line.textContent = doc.evidence || "";
+  // Only a repeat is worth reading: every step should run at most once per hire.
+  runs.textContent = doc.run_count > 1 ? `ran ${doc.run_count}×` : "";
+  const note = view.notes.get(stepId);
+  const showNote = note && !(DONE_STATUSES.has(doc.status) && TRANSIENT_NOTES.has(note.kind));
+  noteLine.hidden = !showNote;
+  noteLine.textContent = showNote ? note.text : "";
+  if (showNote) noteLine.dataset.kind = note.kind;
+}
+
+// highlight: wash rows whose shown status changed (off while a run's history is being replayed).
+function renderSteps(highlight) {
+  const list = $("steps");
+  if (list.childElementCount !== view.stepOrder.length) list.replaceChildren(...view.stepOrder.map(stepRow));
+  for (const row of list.children) updateRow(row, highlight);
 }
 
 function renderRunHead() {
@@ -163,7 +154,9 @@ function renderRunHead() {
   const pending = [...view.steps.values()].find((doc) => doc.status === "pending");
   let text;
   let kind;
-  if (!summary) {
+  if (summary === undefined) {
+    [text, kind] = ["reading Atlas…", "idle"];
+  } else if (!summary) {
     [text, kind] = ["no run yet", "idle"];
   } else if (summary.finished_at) {
     const outcome = summary.ok ? "finished" : "failed";
@@ -241,21 +234,48 @@ function resetTerminal() {
 
 // --- data -------------------------------------------------------------------------
 
-async function refresh() {
-  if (!view.hire) return;
-  const ticket = ++view.refreshTicket;
-  const [steps, comparison] = await Promise.all([
-    getJSON(`/api/hires/${view.hire}/steps`),
-    getJSON(`/api/compare/${view.hire}`),
-  ]);
-  if (ticket <= view.appliedTicket) return;
-  view.appliedTicket = ticket;
-  const previous = view.steps.size ? new Map(view.steps) : null;
+// One request in flight per resource; a refresh asked for meanwhile runs once after it. Replies therefore
+// arrive in order, and a slow comparison query never holds back the step list.
+function coalesced(load) {
+  let running = false;
+  let again = false;
+  return async function run() {
+    if (running) {
+      again = true;
+      return;
+    }
+    running = true;
+    try {
+      await load(view.hire);
+    } finally {
+      running = false;
+      if (again) {
+        again = false;
+        run().catch(showError);
+      }
+    }
+  };
+}
+
+const refreshSteps = coalesced(async (hire) => {
+  const steps = await getJSON(`/api/hires/${hire}/steps`);
+  if (hire !== view.hire) return;
+  const replayed = view.steps.size === 0;
   view.steps = new Map(steps.map((doc) => [doc.step_id, doc]));
+  renderSteps(!replayed);
+  renderRunHead();
+});
+
+const refreshCompare = coalesced(async (hire) => {
+  const comparison = await getJSON(`/api/compare/${hire}`);
+  if (hire !== view.hire) return;
   view.summary = comparison.current;
-  renderSteps(previous);
   renderRunHead();
   renderCompare(comparison);
+});
+
+function refresh() {
+  return Promise.all([refreshSteps(), refreshCompare()]);
 }
 
 async function refreshHires() {
@@ -349,21 +369,21 @@ function applyEvent(event) {
   }
   if (type.startsWith("run_")) refreshHires().catch(showError);
   if (LEDGER_EVENTS.has(type)) scheduleRefresh();
-  else renderSteps(null);
+  else renderSteps(true);
   renderRunHead();
 }
 
 function watch(hire) {
   view.source?.close();
   clearInterval(view.tickTimer);
-  view.appliedTicket = ++view.refreshTicket; // drops replies still in flight for the previous hire
   Object.assign(view, {
-    hire, steps: new Map(), notes: new Map(), checking: new Set(), reconciled: new Set(), notices: [], running: false, summary: null, lastCommand: null,
+    hire, steps: new Map(), notes: new Map(), checking: new Set(), reconciled: new Set(), notices: [], running: false, summary: undefined, lastCommand: null,
   });
   $("run").hidden = false;
   $("empty").hidden = true;
   resetTerminal();
-  renderSteps(null);
+  $("steps").replaceChildren(...view.stepOrder.map(stepRow));
+  renderSteps(false);
   renderRunHead();
 
   // EventSource resends Last-Event-ID on reconnect, so a dropped stream resumes where it stopped.
