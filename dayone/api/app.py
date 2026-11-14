@@ -10,7 +10,8 @@ from typing import Annotated, Any
 
 from bson import ObjectId
 from bson.errors import InvalidId
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
+from fastapi.responses import JSONResponse
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -26,6 +27,7 @@ EVENT_BATCH = 500
 REPLAY_TERMINAL_LINES = 200
 SSE_EVENT = "dayone"  # one Atlas event
 SSE_PROCESS = "process"  # the engine process for this hire started or stopped
+LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1"})
 
 
 @asynccontextmanager
@@ -38,6 +40,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="Day One", lifespan=lifespan)
+
+
+@app.middleware("http")
+async def read_only_off_machine(request: Request, call_next: Any) -> Response:
+    # `dayone serve --lan` lets a phone watch; only this machine may start or resume a run.
+    if request.method != "GET" and (request.client is None or request.client.host not in LOOPBACK_HOSTS):
+        return JSONResponse({"detail": "read-only from other machines: start runs on the demo machine"}, status_code=403)
+    return await call_next(request)
 
 
 def _jsonable(value: Any) -> Any:

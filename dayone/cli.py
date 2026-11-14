@@ -17,6 +17,7 @@ EXIT_MISSING_SETTING = 5
 EXIT_WRONG_MACHINE = 6
 
 API_HOST = "127.0.0.1"
+LAN_HOST = "0.0.0.0"  # every interface, so a phone on the same Wi-Fi can open the read-only views
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -30,7 +31,8 @@ def _parser() -> argparse.ArgumentParser:
     reset = commands.add_parser("reset", help="forget a hire's run (default: every hire)")
     reset.add_argument("hire", nargs="?", choices=HIRES)  # `dayone reset ada` and `dayone reset --hire ada` both work
     reset.add_argument("--hire", dest="hire_option", choices=HIRES)
-    commands.add_parser("serve", help="serve the page and API")
+    serve = commands.add_parser("serve", help="serve the page and API")
+    serve.add_argument("--lan", action="store_true", help="also serve other machines on the network, read-only")
     return parser
 
 
@@ -80,10 +82,10 @@ def _reset(hire: str | None) -> int:
     return EXIT_OK
 
 
-def _serve() -> int:
+def _serve(lan: bool) -> int:
     import uvicorn
 
-    uvicorn.run("dayone.api.app:app", host=API_HOST, port=settings().api_port)
+    uvicorn.run("dayone.api.app:app", host=LAN_HOST if lan else API_HOST, port=settings().api_port)
     return EXIT_OK
 
 
@@ -102,7 +104,7 @@ def main(argv: list[str] | None = None) -> int:
             case "reset":
                 return _reset(args.hire or args.hire_option)
             case "serve":
-                return _serve()
+                return _serve(args.lan)
     except MissingSetting as error:
         print(f"dayone: {error}", file=sys.stderr)
         return EXIT_MISSING_SETTING

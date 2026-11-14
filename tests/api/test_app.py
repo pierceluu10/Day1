@@ -11,10 +11,13 @@ from dayone.api import app as app_module
 from dayone.api import processes
 from dayone.contracts import STEP_IDS
 
+LOCAL_CLIENT = ("127.0.0.1", 50000)
+PHONE_CLIENT = ("192.168.7.60", 50000)
+
 
 @pytest.fixture
 def client(db):
-    with TestClient(app_module.app) as client:
+    with TestClient(app_module.app, client=LOCAL_CLIENT) as client:
         app_module.app.state.db = db  # the lifespan connected to the dev database; tests use their own
         yield client
 
@@ -117,3 +120,16 @@ def test_event_stream_resumes_after_last_event_id(client, db, event, monkeypatch
 def test_event_stream_rejects_a_malformed_last_event_id(client):
     response = client.get("/api/hires/barbara/events", headers={"Last-Event-ID": "not-an-id"})
     assert response.status_code == 400
+
+
+def test_other_machines_can_watch_but_not_start(db, spawned):
+    with TestClient(app_module.app, client=PHONE_CLIENT) as phone:
+        app_module.app.state.db = db
+        started = phone.post("/api/runs", json={"hire": "barbara", "machine": "ubuntu"})
+        resumed = phone.post("/api/runs/barbara/resume")
+        config = phone.get("/api/config")
+        page = phone.get("/terminal.html")
+    print(started.status_code, started.text, resumed.status_code, config.status_code, page.status_code)
+    assert started.status_code == resumed.status_code == 403
+    assert spawned == []
+    assert config.status_code == page.status_code == 200
