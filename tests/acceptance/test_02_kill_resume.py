@@ -28,6 +28,7 @@ pytestmark = [pytest.mark.system, requires_system]
 DRIFT_STEP = "t_clone"
 DRIFT_COMMAND = f"git -C {REPO_DIR} reset -q --hard HEAD~1"
 DOWNSTREAM_OF_HEAD = STEP_IDS[STEP_IDS.index("t_clone") :]
+MAX_RUNS_AFTER_ONE_KILL = 2  # the run the kill interrupted, then one re-run
 TERMINAL_HEAVY_STEPS = frozenset({"t_install_deps", "t_run_tests"})
 VOLATILE = (
     (re.compile(r"SHA256:[A-Za-z0-9+/=]+"), "SHA256:<key>"),
@@ -179,3 +180,14 @@ def test_kill_nine_at_five_points_then_resume(onboard, db, log_dir, fresh_hire, 
         if mask(killed[step_id]["evidence"]) != mask(clean[step_id]["evidence"])
     ]
     assert differences == []
+
+    # Leftovers of a killed run (e.g. an apt-get still holding the dpkg lock) must not cost the resume:
+    # a step the clean run verified first try needs only the killed run plus one re-run, with no error.
+    errored = {event["step_id"] for event in of_type(events, EventType.ERROR_CAPTURED)}
+    collateral = [
+        f"{step_id}: run_count {killed[step_id]['run_count']}, errored {step_id in errored}"
+        for step_id in sorted(set().union(*pending_at_kill))
+        if clean[step_id]["status"] == StepStatus.VERIFIED
+        and (killed[step_id]["run_count"] > MAX_RUNS_AFTER_ONE_KILL or step_id in errored)
+    ]
+    assert collateral == [], "a kill left damage the resume had to repair"
