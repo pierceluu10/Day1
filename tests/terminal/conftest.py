@@ -5,10 +5,13 @@ import httpx
 import pytest
 
 from dayone.config import settings
-from dayone.contracts import EventType, Hire, Machine, StepContext, container_name, idempotency_key
+from dayone.contracts import HIRES, EventType, Hire, Machine, StepContext, container_name, idempotency_key
 from dayone.terminal.docker import DockerExecutor
 
-DEV_HIRE = "grace"  # the only hire session 3 may touch
+DEV_HIRE = "grace"  # Gitea account whose key and SSH access the live tests use
+# The laptop is never a hire container: those belong to integration runs (concurrent apt hits the dpkg lock).
+DEV_CONTAINER = "dayone-dev3"
+HIRE_CONTAINERS = frozenset(container_name(hire) for hire in HIRES)
 DOCKER_TIMEOUT_S = 60.0
 
 
@@ -53,7 +56,8 @@ def gitea(docker):
 
 @pytest.fixture
 def make_executor(docker):
-    def make(machine: Machine, container: str = container_name(DEV_HIRE)) -> DockerExecutor:
+    def make(machine: Machine, container: str = DEV_CONTAINER) -> DockerExecutor:
+        assert container not in HIRE_CONTAINERS, f"tests must not touch hire container {container}"
         return DockerExecutor(Hire(DEV_HIRE, machine, container, "test-run"), RecordingBus(), DOCKER_TIMEOUT_S)
 
     return make

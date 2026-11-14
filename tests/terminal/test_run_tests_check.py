@@ -29,7 +29,7 @@ class ScriptedExecutor:
 
 def _check(report):
     executor = ScriptedExecutor(report)
-    hire = Hire("grace", Machine.UBUNTU, "dayone-grace", "r")
+    hire = Hire("grace", Machine.UBUNTU, "dayone-dev3", "r")
     return check_run_tests(StepContext(hire, "t_run_tests", "k", executor, None, None, None, None))
 
 

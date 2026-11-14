@@ -84,7 +84,7 @@ class ReplayExecutor:
 def test_check_error_text_leads_with_the_command_and_still_matches_across_machines(step, check):
     def failing(machine):
         executor = ReplayExecutor(_error(f"{machine}_{step}.txt"))
-        ctx = StepContext(Hire("grace", machine, "dayone-grace", "r"), step, "k", executor, None, None, None, None)
+        ctx = StepContext(Hire("grace", machine, "dayone-dev3", "r"), step, "k", executor, None, None, None, None)
         return check(ctx)
 
     ubuntu, alpine = failing(Machine.UBUNTU), failing(Machine.ALPINE)
