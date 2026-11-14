@@ -26,8 +26,6 @@ from harness import Agent, EventWatcher, requires_system
 
 pytestmark = [pytest.mark.system, requires_system]
 
-HIRE = "barbara"
-MEMORY_DONOR = "ada"
 DRIFT_PATH = "qa/drift-{ns}.md"
 DOWNSTREAM_OF_HEAD = STEP_IDS[STEP_IDS.index("t_clone") :]
 TERMINAL_HEAVY_STEPS = frozenset({"t_install_deps", "t_run_tests"})
@@ -125,31 +123,32 @@ def print_ledger(title: str, steps: dict[str, dict[str, Any]]) -> None:
         print(f"  {step_id:18} {doc.get('status')!s:20} runs={doc.get('run_count')} | {doc.get('evidence')}")
 
 
-def test_kill_nine_at_five_points_then_resume(onboard, db, gitea, log_dir, fresh_hire):
-    donor = onboard(MEMORY_DONOR, Machine.UBUNTU)
-    assert donor.exit_code == 0, f"{MEMORY_DONOR}'s run must succeed first so {HIRE} resolves from memory"
+def test_kill_nine_at_five_points_then_resume(onboard, db, gitea, log_dir, fresh_hire, hires):
+    hire, donor_name = hires["killed"], hires["first"]
+    donor = onboard(donor_name, Machine.UBUNTU)
+    assert donor.exit_code == 0, f"{donor_name}'s run must succeed first so {hire} resolves from memory"
 
-    fresh_hire(HIRE)
-    watcher = EventWatcher(db, HIRE)
-    agent = Agent(log_dir, "start", "--hire", HIRE, "--machine", Machine.UBUNTU.value)
+    fresh_hire(hire)
+    watcher = EventWatcher(db, hire)
+    agent = Agent(log_dir, "start", "--hire", hire, "--machine", Machine.UBUNTU.value)
     pending_at_kill: list[set[str]] = []
     for point in KILL_POINTS:
         watcher.wait_for(agent, point.name, point.predicate)
         agent.kill()
-        steps = ledger(db, HIRE)
+        steps = ledger(db, hire)
         pending = {step_id for step_id, doc in steps.items() if doc["status"] == StepStatus.PENDING}
         pending_at_kill.append(pending)
         print_ledger(f"after kill -9 {point.name}: pending {sorted(pending)}", steps)
         if point.drift_before_resume:
             push_drift_commit(gitea)
-        agent = Agent(log_dir, "resume", "--hire", HIRE)
+        agent = Agent(log_dir, "resume", "--hire", hire)
     assert agent.wait() == 0, agent.output_tail()
 
-    killed = ledger(db, HIRE)
+    killed = ledger(db, hire)
     print_ledger("final ledger after five kills", killed)
-    run_ids = {event["run_id"] for event in db.events.find({"hire": HIRE}, {"run_id": 1})}
+    run_ids = {event["run_id"] for event in db.events.find({"hire": hire}, {"run_id": 1})}
     assert len(run_ids) == 1, f"resume must keep the run_id, saw {run_ids}"
-    events = run_events(db, HIRE, run_ids.pop())
+    events = run_events(db, hire, run_ids.pop())
 
     assert reruns_after_done(events) == []
 
@@ -173,10 +172,10 @@ def test_kill_nine_at_five_points_then_resume(onboard, db, gitea, log_dir, fresh
     assert any(pending_at_kill), "no kill left a step pending: the kill points did not land mid-step"
 
     # Reference: the same hire, same repo HEAD, same memory, never killed.
-    fresh_hire(HIRE)
-    reference_agent = Agent(log_dir, "start", "--hire", HIRE, "--machine", Machine.UBUNTU.value)
+    fresh_hire(hire)
+    reference_agent = Agent(log_dir, "start", "--hire", hire, "--machine", Machine.UBUNTU.value)
     assert reference_agent.wait() == 0, reference_agent.output_tail()
-    clean = ledger(db, HIRE)
+    clean = ledger(db, hire)
     print_ledger("clean reference run", clean)
     differences = [
         f"{step_id}: killed {killed[step_id]['status']} vs clean {clean[step_id]['status']}"

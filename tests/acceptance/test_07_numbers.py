@@ -20,8 +20,6 @@ from harness import Agent, requires, requires_system
 
 pytestmark = [pytest.mark.system, requires_system, requires("dayone.api")]
 
-BASELINE = "ada"
-HIRE = "grace"
 COMPARE_PATH = "/api/compare/{hire}"
 STEPS_PATH = "/api/hires/{hire}/steps"
 NUMBER_FIELDS = ("elapsed_s", "errors", "fixes_from_memory", "llm_calls")
@@ -81,17 +79,18 @@ def api(log_dir, monkeypatch) -> Iterator[httpx.Client]:
     server.kill()
 
 
-def test_api_numbers_match_atlas(onboard, db, api):
-    for hire, machine in ((BASELINE, Machine.UBUNTU), (HIRE, Machine.UBUNTU)):
-        assert onboard(hire, machine).exit_code == 0
+def test_api_numbers_match_atlas(onboard, db, api, hires):
+    baseline, current = hires["first"], hires["second"]
+    for name in {baseline, current}:
+        assert onboard(name, Machine.UBUNTU).exit_code == 0
 
-    response = api.get(COMPARE_PATH.format(hire=HIRE))
+    response = api.get(COMPARE_PATH.format(hire=current))
     assert response.status_code == 200, response.text
     compare = response.json()
-    print(f"GET {COMPARE_PATH.format(hire=HIRE)} -> {compare}")
+    print(f"GET {COMPARE_PATH.format(hire=current)} -> {compare}")
 
     entries = {entry["hire"]: entry for entry in dicts_with(compare, "hire")}
-    assert {BASELINE, HIRE} <= set(entries), f"compare does not show both {BASELINE} and {HIRE}: {sorted(entries)}"
+    assert {baseline, current} <= set(entries), f"compare does not show both {baseline} and {current}: {sorted(entries)}"
     mismatches = []
     for hire, entry in entries.items():
         expected = numbers(db, hire)
@@ -106,7 +105,7 @@ def test_api_numbers_match_atlas(onboard, db, api):
     uncompared = [path for path, _ in numeric_leaves(compare) if path.rsplit(".", 1)[-1] not in NUMBER_FIELDS]
     assert uncompared == [], f"compare serves numbers this test does not check against Atlas: {uncompared}"
 
-    for hire in (BASELINE, HIRE):
+    for hire in (baseline, current):
         response = api.get(STEPS_PATH.format(hire=hire))
         assert response.status_code == 200, response.text
         served = list(dicts_with(response.json(), "step_id"))

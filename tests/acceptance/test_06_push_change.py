@@ -20,19 +20,18 @@ pytestmark = [
     pytest.mark.skipif(not PUSH_CHANGE.exists(), reason=f"needs {PUSH_CHANGE.relative_to(ROOT)} (not written yet)"),
 ]
 
-HIRE = "linus"
-MEMORY_DONOR = "ada"
 CHANGE_AFTER = "t_clone"
 RE_VERIFIED = ("t_clone", "t_install_deps", "t_run_tests")
 
 
-def test_mid_run_repository_change_is_detected_and_handled(onboard, db, gitea, log_dir, fresh_hire):
-    donor = onboard(MEMORY_DONOR, Machine.UBUNTU)
+def test_mid_run_repository_change_is_detected_and_handled(onboard, db, gitea, log_dir, fresh_hire, hires):
+    hire, donor_name = hires["drift"], hires["first"]
+    donor = onboard(donor_name, Machine.UBUNTU)
     assert donor.exit_code == 0, donor.output_tail
 
-    fresh_hire(HIRE)
-    watcher = EventWatcher(db, HIRE)
-    agent = Agent(log_dir, "start", "--hire", HIRE, "--machine", Machine.UBUNTU.value)
+    fresh_hire(hire)
+    watcher = EventWatcher(db, hire)
+    agent = Agent(log_dir, "start", "--hire", hire, "--machine", Machine.UBUNTU.value)
     watcher.wait_for(
         agent,
         f"{CHANGE_AFTER} done",
@@ -48,8 +47,8 @@ def test_mid_run_repository_change_is_detected_and_handled(onboard, db, gitea, l
     assert head_after != head_before, "push_change.sh did not move the branch HEAD"
     assert agent.wait() == 0, agent.output_tail()
 
-    run_id = latest_run_id(db, HIRE)
-    events = run_events(db, HIRE, run_id)
+    run_id = latest_run_id(db, hire)
+    events = run_events(db, hire, run_id)
     types = [event["type"] for event in events]
     pushed_at = next(
         i for i, event in enumerate(events)
@@ -72,10 +71,10 @@ def test_mid_run_repository_change_is_detected_and_handled(onboard, db, gitea, l
     assert errors_after, "the change introduced no new error: push_change.sh did not exercise adaptation"
     assert EventType.EXPERIENCE_SAVED in types[drift_at:], "the fix for the new error was not saved"
 
-    steps = ledger(db, HIRE)
+    steps = ledger(db, hire)
     for step_id in STEP_IDS:
         assert steps[step_id]["status"] in DONE_STATUSES, (step_id, steps[step_id]["status"])
         assert steps[step_id]["status"] != StepStatus.STALE
-    local = container_exec(HIRE, f"git -C {REPO_DIR} rev-parse HEAD")
+    local = container_exec(hire, f"git -C {REPO_DIR} rev-parse HEAD")
     assert local.stdout.strip() == head_after, f"container HEAD {local.stdout.strip()} != API HEAD {head_after}"
     assert of_type(events, EventType.RUN_FINISHED)

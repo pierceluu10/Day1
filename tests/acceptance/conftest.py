@@ -16,6 +16,7 @@ from dayone.contracts import REPO, Machine
 from harness import Agent, container_exists, run_cli
 
 TICKED_ITEM = "- [x]"
+DEFAULT_HIRES = {"first": "ada", "second": "grace", "killed": "barbara", "alpine": "ken", "drift": "linus"}
 
 
 @dataclass(frozen=True)
@@ -25,6 +26,13 @@ class Run:
     exit_code: int
     output_tail: str
     run_id: str
+
+
+@pytest.fixture(scope="session")
+def hires(request: pytest.FixtureRequest) -> dict[str, str]:
+    """Role -> Gitea hire. `--hire NAME` maps every role to NAME, for when other hires are in use."""
+    only = request.config.getoption("--hire")
+    return dict.fromkeys(DEFAULT_HIRES, only) if only else DEFAULT_HIRES
 
 
 @pytest.fixture(scope="session")

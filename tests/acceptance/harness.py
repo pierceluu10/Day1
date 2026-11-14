@@ -65,6 +65,13 @@ def requires(*modules: str) -> pytest.MarkDecorator:
 requires_system = requires(*SYSTEM_MODULES)
 
 
+def distinct(hires: dict[str, str], *roles: str) -> None:
+    """Skip a test whose roles must be different people (comparing a run with itself proves nothing)."""
+    names = [hires[role] for role in roles]
+    if len(set(names)) < len(names):
+        pytest.skip(f"needs distinct hires for roles {roles}, got {names}")
+
+
 class CliFailed(AssertionError):
     pass
 
