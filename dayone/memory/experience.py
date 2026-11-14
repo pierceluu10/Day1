@@ -404,35 +404,15 @@ class ExperienceMemory:
     # --- browser locators -------------------------------------------------------------
 
     def find_locator(self, goal: str, page_summary: str) -> LocatorHint | None:
-        exact = self._experiences.find_one(
+        # Exact goal only, no vector search: every goal on one page shares its page summary and near-identical
+        # wording ("sign-in page: username field" vs "...: remember this device checkbox"), so a semantic hit hands
+        # one goal another goal's element. A same-goal hit is already found here, newest first, whatever the layout;
+        # a moved element is caught when the locator fails and the browser reasons over the page (page_summary).
+        document = self._experiences.find_one(
             {"kind": StepKind.BROWSER, "outcome": VERIFIED, "goal": goal}, sort=[("updated_at", DESCENDING)]
         )
-        if exact:
-            return self._hint(exact, similarity=None)
-        [vector] = self._embedder.embed([f"{goal}\n{page_summary}"], QUERY)
-        hits = list(
-            self._experiences.aggregate(
-                [
-                    {
-                        "$vectorSearch": {
-                            "index": VECTOR_INDEX,
-                            "path": "embedding",
-                            "queryVector": vector,
-                            "numCandidates": NUM_CANDIDATES,
-                            "limit": 1,
-                            "filter": {"outcome": VERIFIED, "kind": StepKind.BROWSER},
-                        }
-                    },
-                    {"$set": {"score": {"$meta": "vectorSearchScore"}}},
-                    {"$project": {"embedding": 0}},
-                ]
-            )
-        )
-        if not hits or hits[0]["score"] < SEMANTIC_MIN_SIMILARITY:
+        if document is None:
             return None
-        return self._hint(hits[0], similarity=hits[0]["score"])
-
-    def _hint(self, document: dict[str, Any], similarity: float | None) -> LocatorHint:
         bbox = document.get("bbox")
         return LocatorHint(
             goal=document["goal"],
@@ -440,18 +420,23 @@ class ExperienceMemory:
             bbox=tuple(bbox) if bbox else None,
             page_summary=document["page_summary"],
             source_hire=document["hire"],
-            similarity=similarity,
+            similarity=None,
         )
 
     def save_locator(self, hint: LocatorHint, hire: str) -> None:
-        key = {"kind": StepKind.BROWSER, "outcome": VERIFIED, "goal": hint.goal, "locator": hint.locator}
-        fields = {"bbox": list(hint.bbox) if hint.bbox else None, "page_summary": hint.page_summary, "updated_at": _now()}
-        updated = self._experiences.update_one(key, {"$set": fields, "$inc": {"uses": 1}, "$addToSet": {"hires": hire}})
-        if updated.matched_count:
-            return
-        [vector] = self._embedder.embed([f"{hint.goal}\n{hint.page_summary}"], DOCUMENT)
-        self._experiences.insert_one(
-            {**key, **fields, "hire": hire, "hires": [hire], "uses": 1, "embedding": vector, "created_at": _now()}
+        self._experiences.update_one(
+            {"kind": StepKind.BROWSER, "outcome": VERIFIED, "goal": hint.goal, "locator": hint.locator},
+            {
+                "$set": {
+                    "bbox": list(hint.bbox) if hint.bbox else None,
+                    "page_summary": hint.page_summary,
+                    "updated_at": _now(),
+                },
+                "$inc": {"uses": 1},
+                "$addToSet": {"hires": hire},
+                "$setOnInsert": {"hire": hire, "created_at": _now()},
+            },
+            upsert=True,
         )
 
     # --- closing the loop ---------------------------------------------------------------
