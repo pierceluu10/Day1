@@ -55,14 +55,15 @@ Integration branch: `claude/day-one-mongodb-agent-6cc839` (orchestrator session)
 
 ## In progress / blocked / next
 
-Updated 12:55.
+Updated 13:25.
 
-Merged into integration: infra (Gitea, seed, GiteaClient, reset_hire, acme-api), engine (+ step-exception boundary, reset), terminal, browser, memory (+ locator goal fix), `dayone/steps/__init__.py`, index creation in wiring.
+All seven branches merged into integration and their suites pass there (engine, memory, overlay, infra, API, terminal fast tests; browser in-session).
 
-**13:15 checkpoint met at 12:51**: real ada/ubuntu run in Atlas `dayone`: 2 terminal steps verified, crash in `b_sign_in`, resume re-checked them (run_count stayed 1), `b_sign_in` pending was checked first, then 9 more steps verified or fixed: SSH key verified by API + `ssh -T`, clone `8094472 = 8094472`, runtime / system package / settings fixed by reasoning. Run ended FAILED at `t_init_db` (honestly recorded).
+**Ada (hire 1, ubuntu) green end to end at 13:23**: 13/13 steps done in Atlas `dayone`. Four snags fixed by reasoning (runtime, system package, settings, db init; 5 LLM calls). Crash (13:17, failed step) then `dayone resume`: 10 done steps reconciled in 15 s with run_count unchanged, failed step retried and fixed. SSH key verified by API + `ssh -T`; clone `8094472 = 8094472`; Welcome checklist 6/6 via API.
 
-Open bugs (assigned):
-- Memory (5): semantic hits cross steps (t_runtime fix offered for t_system_package/t_settings/t_init_db at 0.81 to 0.84); saved `fix_commands` include failed proposals; reasoning never sees its commands' output, so `t_init_db` failed after 3 attempts.
-- Browser (4): `b_open_welcome` passes vacuously after `tick_checklist` navigates to the issue (untrusted); validate element fits action.
+Open:
+- Memory (5): saved `t_init_db` fix kept the failed `make migrate`; blocks hire 2 zero-LLM replay.
+- Terminal (3): `t_run_tests` check runs pytest itself, so it is always `skipped`/untrusted; moving to a HEAD-keyed junit report written by run().
+- Page (6): testing Start with a real grace run.
 
-Next: merge those fixes, `dayone reset ada`, full ada run to green (14:30 checkpoint), then kill -9 at random points.
+Next: grace (debian, hire 2) from memory; kill -9 harness (QA); push_change live; ken on alpine; measure.
