@@ -16,7 +16,6 @@ from dayone.contracts import REPO, Machine
 from harness import Agent, container_exists, run_cli
 
 TICKED_ITEM = "- [x]"
-UNTICKED_ITEM = "- [ ]"
 
 
 @dataclass(frozen=True)
@@ -56,21 +55,13 @@ def log_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
 
 @pytest.fixture(scope="session")
 def fresh_hire(gitea) -> Callable[[str], None]:
-    """`dayone reset NAME` plus the hire's Gitea state, then prove the hire really starts from nothing.
-
-    `dayone reset` clears Atlas and the container but not Gitea (no contract method for it), and
-    scripts/reset.sh would reset every hire, so the hire's keys and Welcome ticks are cleared here.
-    """
+    """`dayone reset NAME`, then prove it left the hire with nothing: no container, no Gitea keys, no ticks."""
 
     def reset(hire: str) -> None:
         run_cli("reset", hire)
-        for key in gitea.user_keys(hire):
-            gitea.request("DELETE", f"/admin/users/{hire}/keys/{key['id']}")
-        issue = gitea.welcome_issue(hire)
-        gitea.request("PATCH", f"/repos/{REPO}/issues/{issue['number']}", json={"body": issue["body"].replace(TICKED_ITEM, UNTICKED_ITEM)})
         assert not container_exists(hire), f"dayone reset {hire} left container dayone-{hire} behind"
         keys = gitea.user_keys(hire)
-        assert keys == [], f"{hire} still has Gitea SSH keys after cleanup: {[key['title'] for key in keys]}"
+        assert keys == [], f"dayone reset {hire} left Gitea SSH keys: {[key['title'] for key in keys]}"
         body = gitea.welcome_issue(hire)["body"]
         assert TICKED_ITEM not in body, f"{hire}'s Welcome issue on {REPO} is still ticked:\n{body}"
 
