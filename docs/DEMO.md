@@ -17,7 +17,7 @@ Hires 1 to 3 were run fresh at 15:15 on `acme-api` c9d8d7f, so the memory in Atl
 ## Screen layout
 
 - Left two thirds: the headed Chromium window the agent drives, with `intern_overlay.js` rings (green = acting from memory, amber = reasoning, red "This moved." = a saved locator failed).
-- Right third: the Day One page (`http://localhost:8000`). It shows the step list with status and one evidence line each, the streaming terminal below it, and the comparison lines computed from Atlas, e.g. "ada, hire 1 (ubuntu): 2m 55s, 4 errors, 0 from memory, 7 LLM calls, finished earlier today at …" and "linus (ubuntu): 2m 36s, 4 errors, 4 from memory, 0 LLM calls".
+- Right third: the Preflight page (`http://localhost:8000`). It shows the step list with status and one evidence line each, the streaming terminal below it, and the comparison lines computed from Atlas, e.g. "ada, hire 1 (ubuntu): 2m 55s, 4 errors, 0 from memory, 7 LLM calls, finished earlier today at …" and "linus (ubuntu): 2m 36s, 4 errors, 4 from memory, 0 LLM calls".
 - A terminal tab for `scripts/move_ui.sh`, `kill -9` and `scripts/push_change.sh`.
 
 ## What to say about time
@@ -32,7 +32,7 @@ Lead with LLM calls, not minutes: 7 → 4 → 0. Same-OS wall time only drops 2m
 
 | Time | What the audience sees (real strings) | Track 3 question | If it goes wrong |
 |---|---|---|---|
-| 0:00 | One sentence: every new hire hits the same broken setup steps and the fix is lost. Day One fixes that. Point at ada's line: 4 errors, all solved by reasoning, 7 LLM calls. | | |
+| 0:00 | One sentence: every new hire hits the same broken setup steps and the fix is lost. Preflight fixes that. Point at ada's line: 4 errors, all solved by reasoning, 7 LLM calls. | | |
 | 0:10 | In the terminal tab: `scripts/move_ui.sh` ("we just changed Gitea's SSH-key form"). Gitea restarts for 2 to 3 s; wait for it to return before Start. | Q3 | If Gitea does not answer within 10 s, skip the UI move and say "the form change is shown in the recording". |
 | 0:15 | Type `barbara`, pick ubuntu, Start. Chromium signs in with a green ring (locator from memory). At the key form the saved locator fails: red "This moved.", then amber while it reasons over the page's accessibility text, finds the new fields, adds the key and saves the new locator. | Q3, Q1 | If reasoning takes all 3 attempts, keep talking about why: "it is reading the page, not guessing a selector". |
 | 0:35 | "SSH key added in browser" turns verified only after two independent checks: "API lists key SHA256:…; ssh -T: authenticated as barbara". "acme-api cloned": "local HEAD c9d8d7f = API HEAD c9d8d7f". | Q1 | |
@@ -42,7 +42,7 @@ Lead with LLM calls, not minutes: 7 → 4 → 0. Same-OS wall time only drops 2m
 | 1:35 | `scripts/push_change.sh` adds python-ldap, which needs another system package. Notice: "Remote HEAD moved c9d8d7f… → ….". "acme-api cloned" and every later step turn stale and are re-verified. The new build error goes to memory, then to reasoning (amber), which installs `libldap2-dev libsasl2-dev` and saves the experience. | Q3 | Fallback: say "the remembered fix did not cover the new package, so it reasons", which is what test 6 showed. |
 | 2:10 | "Tests pass": "14 passed of 14, exit 0 at …". "Welcome checklist ticked": "API issue body: 6/6 items ticked". | | |
 | 2:20 | Switch to `ken` on alpine. The psycopg2 error is retrieved by vector search: "similar error from barbara, similarity 0.94, adapted from ubuntu 22.04, apt: apk add --no-cache postgresql-dev python3-dev build-base musl-dev". | memory, Q3 | If not run live, it is labelled as recorded. |
-| 2:40 | Gitea: the README issues Day One opened on `acme-api` (#10 to #13), one per snag applied for two or more hires. | closing the loop | |
+| 2:40 | Gitea: the README issues Preflight opened on `acme-api` (#10 to #13), one per snag applied for two or more hires. | closing the loop | These four predate the rename and say "Opened by Day One": "that was its working name"; new issues say Preflight. |
 | 2:50 | One sentence: state in Atlas, verified by independent checks, memory by vector search. | | |
 
 ## Snags in `acme-api` (what the agent must discover; the README mentions none)

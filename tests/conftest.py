@@ -30,7 +30,7 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 
 
 def pytest_configure(config: pytest.Config) -> None:
-    config.addinivalue_line("markers", f"system: drives the real Day One system; runs only with {ACCEPTANCE_OPTION}")
+    config.addinivalue_line("markers", f"system: drives the real Preflight system; runs only with {ACCEPTANCE_OPTION}")
     if config.getoption(ACCEPTANCE_OPTION):
         # Before anything calls dayone.config.settings() (cached); `dayone` subprocesses inherit it,
         # and load_dotenv never overrides a variable that is already set.

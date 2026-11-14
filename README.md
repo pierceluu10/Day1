@@ -1,8 +1,8 @@
-# Day One
+# Preflight
 
-Every new hire loses their first days to the same broken setup steps, solves them alone, and the fix is lost. Day One is an agent the new hire starts with one command. It sets up their Git account in a real browser and their laptop in a real terminal until the team's tests pass. It confirms every step really took effect, resumes after `kill -9` with nothing done twice, adapts when the repository changes mid-setup, and remembers every error-and-fix in MongoDB Atlas so the next hire never solves it again, even on a machine type it has never seen.
+Every new hire loses their first days to the same broken setup steps, solves them alone, and the fix is lost. Preflight is an agent the new hire starts with one command. It sets up their Git account in a real browser and their laptop in a real terminal until the team's tests pass. It confirms every step really took effect, resumes after `kill -9` with nothing done twice, adapts when the repository changes mid-setup, and remembers every error-and-fix in MongoDB Atlas so the next hire never solves it again, even on a machine type it has never seen.
 
-Built today for the MongoDB hackathon, Track 3 "Finish the Job". `demo_repo/` (`acme-api`) is a demo service built today to mirror common onboarding problems; its README mentions none of the four snags the agent has to find.
+Built today for the MongoDB hackathon, Track 3 "Finish the Job". The CLI and package are named `dayone` (as are the Atlas database and the `dayone-<hire>` containers), from the project's working name. `demo_repo/` (`acme-api`) is a demo service built today to mirror common onboarding problems; its README mentions none of the four snags the agent has to find.
 
 ## Run it
 
