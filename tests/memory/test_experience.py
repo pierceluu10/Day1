@@ -20,7 +20,9 @@ from dayone.contracts import (
     StepKind,
 )
 from dayone.memory.experience import (
+    FIX_OUTPUT,
     MAX_REASONING_ATTEMPTS,
+    MAX_REJECTED_REPLIES,
     REASON_SYSTEM,
     SEMANTIC_MIN_SIMILARITY,
     ExperienceMemory,
@@ -212,10 +214,13 @@ def test_reasoning_stops_after_three_attempts_and_feeds_back_each_new_error(harn
 
     assert not resolution.fixed and resolution.proposal is None
     assert resolution.attempts == len(calls) == 3
-    assert resolution.llm_calls == len(llm.prompts) == 3
+    # A rejected reply is re-asked without costing a try, so calls may exceed tries by up to MAX_REJECTED_REPLIES.
+    assert resolution.llm_calls == len(llm.prompts)
+    assert MAX_REASONING_ATTEMPTS <= resolution.llm_calls <= MAX_REASONING_ATTEMPTS + MAX_REJECTED_REPLIES
     assert resolution.last_check.error_text == new_errors[2]
-    assert new_errors[0] in llm.prompts[1] and new_errors[1] in llm.prompts[2]
-    assert all(command in llm.prompts[1] for command in calls[0].commands), "prior commands are fed back"
+    assert not any(error in llm.prompts[0] for error in new_errors)
+    assert new_errors[0] in llm.prompts[-1] and new_errors[1] in llm.prompts[-1], "each new error is fed back"
+    assert all(command in llm.prompts[-1] for command in calls[0].commands), "prior commands are fed back"
     assert len(events.of(EventType.MEMORY_MISS)) == 1 and len(events.of(EventType.REASONING_STARTED)) == 1
     assert [attempt["ok"] for attempt in events.of(EventType.FIX_ATTEMPT)] == [False] * 3
     assert experiences.count_documents({"outcome": "failed"}) == 3
@@ -312,6 +317,34 @@ def test_unparseable_reply_does_not_use_up_a_tried_attempt(harness, embedder):
     assert ".venv/bin/pip" in REASON_SYSTEM
 
 
+def test_saved_fix_keeps_only_commands_that_exited_zero(harness):
+    memory, _, _, _, experiences = harness
+    calls: list[FixProposal] = []
+
+    def engine_try_fix(proposal: FixProposal) -> CheckResult:
+        """Like runner._try_fix: stop at the first failing command; attempt 1's last fix command exits 2."""
+        calls.append(proposal)
+        fixes = [command for command in proposal.commands if not command.endswith("|| true")]
+        outputs = []
+        for command in proposal.commands:
+            failing = len(calls) == 1 and command == fixes[-1]
+            outputs.append({"command": command, "exit_code": 2 if failing else 0, "output": ""})
+            if failing:
+                return CheckResult(
+                    ok=False, evidence=f"fix command failed: {command}", detail={FIX_OUTPUT: outputs},
+                    error_text="make: *** No rule to make target 'migrate'.  Stop.",
+                )
+        return CheckResult(ok=True, evidence="schema present: users", detail={FIX_OUTPUT: outputs})
+
+    resolution = memory.resolve(failure("ada", UBUNTU, "sqlite3.OperationalError: no such table: users"), engine_try_fix)
+
+    assert resolution.fixed and resolution.attempts == 2
+    first, second = ([c for c in call.commands if not c.endswith("|| true")] for call in calls)
+    saved = experiences.find_one({"_id": ObjectId(resolution.proposal.experience_id)})
+    print("attempt 1", first, "attempt 2", second, "saved", saved["fix_commands"])
+    assert saved["fix_commands"] == first[:-1] + second, "the failed command must not be replayed by hire 2"
+
+
 def test_close_loop_opens_one_issue_per_repeated_fix_and_is_idempotent(harness):
     memory, _, events, gitea, experiences = harness
     save_ada_ubuntu_fix(memory, [])
@@ -364,6 +397,8 @@ def test_guard_makes_model_commands_runnable_unattended():
         '```json\n{"inspect": ["grep -rn init ."], "commands": ["apt-get update"], "rationale": "refresh"}\n```'
     )
     assert inspect == ("grep -rn init . || true",), "a grep with no match must not abort the attempt"
+    inspect, _, _ = parse_fix('{"inspect": ["ls docs || true"], "commands": ["true"]}')
+    assert inspect == ("ls docs || true",)
     assert commands == ("apt-get update",) and rationale == "refresh"
     inspect, _, _ = parse_fix(r"""{"inspect": ["grep -rn 'init_db\|schema' ."], "commands": ["true"]}""")
     assert inspect == (r"grep -rn 'init_db\|schema' . || true",), "an undoubled backslash is kept literally"
