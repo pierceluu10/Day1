@@ -1,0 +1,5 @@
+-e .
+fastapi==0.115.6
+httpx==0.28.1
+pytest==8.3.4
+psycopg2==2.9.10
