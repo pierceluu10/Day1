@@ -1,0 +1,42 @@
+name: dayone
+
+services:
+  gitea:
+    image: gitea/gitea:1.24.7
+    container_name: gitea
+    hostname: gitea
+    restart: unless-stopped
+    environment:
+      USER_UID: "1000"
+      USER_GID: "1000"
+      GITEA__database__DB_TYPE: sqlite3
+      GITEA__security__INSTALL_LOCK: "true"
+      GITEA__server__ROOT_URL: http://localhost:3000/
+      GITEA__server__HTTP_PORT: "3000"
+      # Clone URLs as seen from hire containers on dayone-net; the rootful image runs OpenSSH on 22.
+      GITEA__server__SSH_DOMAIN: gitea
+      GITEA__server__SSH_PORT: "22"
+      GITEA__service__DISABLE_REGISTRATION: "true"
+      GITEA__service__REQUIRE_SIGNIN_VIEW: "false"
+      GITEA__repository__DEFAULT_BRANCH: main
+    ports:
+      - "3000:3000"
+      - "2222:22"
+    volumes:
+      - gitea-data:/data
+    networks:
+      - dayone-net
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:3000/api/healthz"]
+      interval: 2s
+      timeout: 3s
+      retries: 60
+
+volumes:
+  gitea-data:
+
+networks:
+  dayone-net:
+    # Created by scripts/up.sh if missing, so hire containers and Gitea share it either way.
+    external: true
+    name: dayone-net
