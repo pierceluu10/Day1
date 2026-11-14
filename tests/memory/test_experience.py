@@ -229,6 +229,33 @@ def test_ubuntu_hit_is_adapted_for_debian_although_both_use_apt(harness):
     assert "debian 12" in llm.prompts[-1] and "ubuntu 22.04" in llm.prompts[-1]
 
 
+def test_same_machine_hit_beats_a_higher_scoring_other_machine_hit(harness):
+    memory, llm, _, _, experiences = harness
+    short_error = "\n".join(UBUNTU_PG_CONFIG.splitlines()[-12:])  # ada saw a shorter log than later hires
+    ada = memory.resolve(failure("ada", UBUNTU, short_error), apt_fix_passes([]))
+    assert ada.fixed
+    wait_until_searchable(experiences, 1)
+    grace = memory.resolve(failure("grace", DEBIAN, UBUNTU_PG_CONFIG), apt_fix_passes([]))
+    assert grace.proposal.source == FixSource.SEMANTIC_MEMORY and grace.proposal.adapted_from == ADA_MACHINE
+    wait_until_searchable(experiences, 2)
+
+    linus = failure("linus", UBUNTU, UBUNTU_PG_CONFIG)  # grace's exact text, on ada's machine
+    # Precondition, via the private search the resolve uses: grace's debian copy must outrank ada's own fix.
+    ranked = memory._nearest(linus, exclude=None)
+    print([(hit["hire"], hit["context"]["os_family"], round(hit["score"], 4)) for hit in ranked])
+    assert ranked[0]["hire"] == "grace", "test setup: the other-machine hit must score highest"
+    assert any(hit["hire"] == "ada" and hit["score"] >= SEMANTIC_MIN_SIMILARITY for hit in ranked)
+
+    prompts_before = len(llm.prompts)
+    resolution = memory.resolve(linus, apt_fix_passes([]))
+
+    assert resolution.fixed and resolution.proposal.source == FixSource.SEMANTIC_MEMORY
+    assert resolution.proposal.experience_id == ada.proposal.experience_id and resolution.proposal.adapted_from is None
+    assert resolution.llm_calls == 0 == len(llm.prompts) - prompts_before
+    assert experiences.find_one({"_id": ObjectId(ada.proposal.experience_id)})["hires"] == ["ada", "linus"]
+    assert experiences.find_one({"_id": ObjectId(grace.proposal.experience_id)})["hires"] == ["grace"]
+
+
 def test_reasoning_stops_after_three_attempts_and_feeds_back_each_new_error(harness):
     memory, llm, events, _, experiences = harness
     new_errors = [f"E: Unable to locate package attempt-{n}-missing-headers" for n in range(1, 4)]

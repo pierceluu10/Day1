@@ -46,6 +46,7 @@ INDEX_READY = "READY"
 INDEX_WAIT_S = 300.0
 NUM_CANDIDATES = 100
 HINT_COUNT = 3
+NEIGHBOUR_COUNT = 10  # enough to find a same-machine hit ranked below other machines' copies of the fix
 SEMANTIC_MIN_SIMILARITY = 0.8  # Atlas cosine score; Phase 0 saw 0.847 for the right fix, 0.73 for the next one
 MAX_REASONING_ATTEMPTS = 3  # fixes actually tried
 MAX_REJECTED_REPLIES = 2  # unparseable replies re-asked on top of those, so a bad reply never costs a try
@@ -277,7 +278,7 @@ class ExperienceMemory:
                 return progress.resolution(proposal)
 
         neighbours = self._nearest(failure, exclude=exact["_id"] if exact else None)
-        semantic = neighbours[0] if neighbours and neighbours[0]["score"] >= SEMANTIC_MIN_SIMILARITY else None
+        semantic = self._pick(failure, neighbours)
         if semantic:
             proposal = self._from_semantic(failure, semantic, progress)
             if proposal:
@@ -294,7 +295,7 @@ class ExperienceMemory:
 
         if not exact and not semantic:
             self._events.emit(EventType.MEMORY_MISS, failure.step_id, fingerprint=failure.fingerprint)
-        return self._reason(failure, try_fix, neighbours, progress)
+        return self._reason(failure, try_fix, neighbours[:HINT_COUNT], progress)
 
     def _exact(self, failure: Failure) -> dict[str, Any] | None:
         return self._experiences.find_one(
@@ -319,7 +320,7 @@ class ExperienceMemory:
                     "path": "embedding",
                     "queryVector": vector,
                     "numCandidates": NUM_CANDIDATES,
-                    "limit": HINT_COUNT + 1,  # room for the excluded exact match
+                    "limit": NEIGHBOUR_COUNT + 1,  # room for the excluded exact match
                     # Same step only: a t_runtime fix scored 0.822 against a t_system_package error and wasted a try.
                     "filter": {"outcome": VERIFIED, "kind": failure.kind, "context.step_id": failure.step_id},
                 }
@@ -329,8 +330,16 @@ class ExperienceMemory:
         ]
         if exclude:
             pipeline.append({"$match": {"_id": {"$ne": exclude}}})
-        pipeline.append({"$limit": HINT_COUNT})
+        pipeline.append({"$limit": NEIGHBOUR_COUNT})
         return list(self._experiences.aggregate(pipeline))
+
+    def _pick(self, failure: Failure, neighbours: list[dict[str, Any]]) -> dict[str, Any] | None:
+        """Best hit above the threshold, preferring this machine's own: reuse it as-is and credit its hires, rather
+        than adapting another machine's adaptation of it."""
+        above = [hit for hit in neighbours if hit["score"] >= SEMANTIC_MIN_SIMILARITY]
+        machine = _machine(failure.facts)
+        same = [hit for hit in above if _machine(_facts_from(hit["context"])) == machine]
+        return (same or above or [None])[0]
 
     def _from_semantic(self, failure: Failure, hit: dict[str, Any], progress: _Progress) -> FixProposal | None:
         base = FixProposal(
