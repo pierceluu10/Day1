@@ -37,7 +37,7 @@ Integration branch: `claude/day-one-mongodb-agent-6cc839` (orchestrator session)
 | Resource | Rule |
 |---|---|
 | Gitea `http://localhost:3000`, SSH `localhost:2222`, container `gitea` on network `dayone-net` | Session 1 creates and seeds it. Others never reset it; ask session 1 (or the orchestrator) for a reset. |
-| Gitea hires `ada grace linus barbara ken` | Dev testing: session 3 uses `grace`, session 4 uses `linus`. `ada`, `barbara`, `ken` are kept clean for integration and the demo. |
+| Gitea hires `ada grace linus barbara ken` | All five belong to integration and the demo (13:40). Dev tests use their own non-hire containers (e.g. `dayone-dev3`), never `dayone-<hire>`. |
 | Hire containers `dayone-<hire>` | Only for the hire you own in dev. |
 | Atlas database | Each session sets `MONGODB_DB=dayone_dev_<session number>` in its own `.env` copy. `dayone` is integration only. |
 | Ports | 3000 and 2222 Gitea, 8000 the page/API. |
