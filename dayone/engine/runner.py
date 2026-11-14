@@ -18,7 +18,6 @@ from contextlib import AbstractContextManager
 from dataclasses import dataclass, replace
 from types import TracebackType
 
-from playwright.sync_api import Error as PlaywrightError
 from pymongo.errors import PyMongoError
 
 from dayone.config import settings
@@ -27,7 +26,6 @@ from dayone.contracts import (
     REPO,
     REPO_BRANCH,
     REPO_DIR,
-    WELCOME_CHECKLIST,
     BrowserSession,
     CheckResult,
     EventBus,
@@ -440,16 +438,6 @@ class Run:
     ) -> None:
         self.store.mark_done(self.hire.name, step.id, status, check, resolution)
         self._report(step, status, check, reconciled)
-        item = WELCOME_CHECKLIST.get(step.id)
-        if item is not None and not reconciled:
-            self._tick(step, item)
-
-    def _tick(self, step: Step, item: str) -> None:
-        # Best effort: b_checklist is the check of record for the Welcome issue.
-        try:
-            self.parts.browser.tick_checklist(item)
-        except PlaywrightError:
-            log.warning("could not tick %r for %s; b_checklist will", item, step.id, exc_info=True)
 
     def _report(self, step: Step, status: StepStatus, check: CheckResult, reconciled: bool) -> None:
         self.events.emit(

@@ -8,7 +8,6 @@ from pathlib import Path
 from playwright.sync_api import Error as PlaywrightError
 
 from dayone.contracts import (
-    WELCOME_CHECKLIST,
     CheckResult,
     EventType,
     FixProposal,
@@ -29,7 +28,7 @@ from tests.engine.fakes import FakeBrowser, FakeExecutor, FakeGitea, FakeMemory,
 
 FIX_COMMAND = "apt-get install -y libpq-dev"
 ERROR = "pg_config executable not found"
-STEP_ID = "t_install_deps"  # has a Welcome checklist item
+STEP_ID = "t_install_deps"  # has a Welcome checklist item, which the engine must leave alone
 
 
 def needs_fix_step(workdir: Path, executor: FakeExecutor) -> Step:
@@ -70,7 +69,8 @@ def test_failure_is_fixed_from_memory_and_verified(store: AtlasStore, tmp_path: 
     doc = store.db["steps"].find_one({"hire": "fixer", "step_id": STEP_ID})
     assert doc["check_ever_failed"] and not doc["untrusted"]
     assert doc["llm_calls"] == 0
-    assert browser.ticked == [WELCOME_CHECKLIST[STEP_ID]]
+    # b_checklist alone ticks the Welcome issue, so its check fails before it passes and stays trusted.
+    assert browser.ticked == [], "the engine must not tick checklist items itself"
     print("executor commands:", executor.commands)
 
 
