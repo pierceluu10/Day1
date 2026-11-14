@@ -14,6 +14,7 @@ pytestmark = [pytest.mark.system, requires_system]
 PASSED_COUNT = re.compile(r"(\d+) passed")
 # Each earlier step ticks its own Welcome item, so by its turn b_checklist's check already passes.
 TICKED_BY_EARLIER_STEPS = frozenset({"b_checklist"})
+FIXED_STATUSES = frozenset({StepStatus.FIXED_FROM_MEMORY.value, StepStatus.FIXED_BY_REASONING.value})
 REASONED = {StepStatus.FIXED_BY_REASONING.value: FixSource.REASONING.value}
 
 
@@ -80,7 +81,7 @@ def test_empty_ubuntu_container_reaches_passing_tests(onboard, db, gitea, hires)
         assert checked is not None and pending is not None and final is not None, (step_id, checked, pending, final)
         assert checked < pending < final, f"{step_id}: check {checked}, pending {pending}, status {final}"
 
-    fixed = [step_id for step_id in STEP_IDS if steps[step_id]["status"] != StepStatus.VERIFIED]
+    fixed = [step_id for step_id in STEP_IDS if steps[step_id]["status"] in FIXED_STATUSES]
     saved = {event["step_id"] for event in of_type(events, EventType.EXPERIENCE_SAVED)}
     assert set(fixed) <= saved, f"fixed without a saved experience: {set(fixed) - saved}"
     for step_id in fixed:
