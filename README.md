@@ -1,5 +1,9 @@
 # Day One
 
+## What it solves
+
+Agents solve many problems on engineering teams, just not the beginning. Every new hire loses their first days to the same setup: outdated onboarding docs, missing system packages, the wrong runtime, a settings file nobody mentioned. Each one hits the problems the last hire already solved, solves them alone, and the fix disappears into a Slack thread. Day One makes onboarding a solved problem: the agent does it, and every fix one hire's agent learns is there for the next.
+
 ## How it works
 
 Day One is an agent harness that gets better with every hire. It follows your team's onboarding workflow end to end: it signs into your tools in a real browser through Playwright, sets up the machine in a real terminal, and verifies each step actually took effect. Every error it hits and the fix that worked is stored in MongoDB Atlas, so the next hire's agent finds it with an exact match or Atlas Vector Search and applies it instantly, even on an operating system no one has used before.
