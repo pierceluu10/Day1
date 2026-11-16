@@ -40,16 +40,6 @@ scripts/push_change.sh                              # commit a new dependency to
 scripts/reset.sh                                    # put Gitea and acme-api back to the seed
 ```
 
-## What it does
-
-Thirteen ordered steps across three systems: a fresh Docker container per hire (`ubuntu:22.04`, `debian:12`, or `alpine:3.20` held out as the unseen machine), Gitea driven through headed Chromium with Playwright, and Atlas.
-
-| Terminal (`docker exec`) | Browser (Playwright) |
-|---|---|
-| install base tools, generate an SSH key, clone over SSH, Python runtime, system package, dependencies, settings file, database init, run tests | sign in, add the SSH key in account settings, open the Welcome issue, tick its checklist |
-
-Every step is `{id, kind, check(), run(), evidence}`. The `run()` is the naive action the README implies; the check is what says it worked.
-
 ## Experience memory (Atlas Vector Search)
 
 When a step's check still fails after `run()`, the agent:
