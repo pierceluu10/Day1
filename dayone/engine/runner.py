@@ -302,7 +302,7 @@ class Run:
         self._mark_stale_from(step.id, reason)
 
     def _head_moved(self, step: Step) -> bool:
-        """Drift probe (Track 3 question 3): before each step after t_clone, has the remote branch moved?"""
+        """Drift probe: before each step after t_clone, has the remote branch moved?"""
         if self.clone_head is None or self._index(step.id) <= self._index(CLONE_STEP):
             return False
         head = self.parts.gitea.branch_head(REPO, REPO_BRANCH)

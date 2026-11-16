@@ -1,4 +1,4 @@
-"""Track 3 question 3: the remote branch moves, or a verified check regresses, mid-run."""
+"""The remote branch moves, or a verified check regresses, mid-run."""
 
 from __future__ import annotations
 

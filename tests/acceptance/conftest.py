@@ -48,7 +48,7 @@ def db(acceptance_db_name: str) -> Iterator[Database]:
     client: MongoClient = MongoClient(settings().mongodb_uri)
     db = client[acceptance_db_name]
     # Memory starts empty. Hires, steps and events are left to `dayone reset NAME`, which needs a hire's
-    # doc to find its container. (The hackathon user may not dropDatabase; this also keeps the vector index.)
+    # doc to find its container. (The Atlas user may not dropDatabase; this also keeps the vector index.)
     print(f"emptied {acceptance_db_name}.experiences: {db.experiences.delete_many({}).deleted_count} documents")
     yield db
     client.close()

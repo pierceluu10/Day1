@@ -16,7 +16,7 @@ dayone start --hire <name>
 
 and is onboarded autonomously: accounts, SSH keys, repository, runtime, system packages, settings, database and a green test suite. If the agent crashes or is killed, `dayone resume` picks up exactly where it stopped from the ledger in Atlas, with nothing done twice. If the repository or a web UI changes mid-run, it detects the drift, re-verifies what is affected and adapts.
 
-Built for the MongoDB hackathon, Track 3 "Finish the Job". `demo_repo/` (`acme-api`) is a sample service with the kind of undocumented setup snags every team has; its README mentions none of the four the agent has to find.
+`demo_repo/` (`acme-api`) is a sample service with the kind of undocumented setup snags every team has; its README mentions none of the four the agent has to find.
 
 ## Run it
 
@@ -65,7 +65,7 @@ When the same fix has helped two or more hires, the agent opens an issue on `acm
 
 Collections: `hires` (lease, container, run), `steps` (unique on hire and step), `events` (ordered by timestamp and sequence; the page streams these over SSE) and `experiences` (vector index on `embedding`, created in code).
 
-## Measured (from Atlas, `MONGODB_DB=dayone`)
+## Benchmarks (4 sequential hires)
 
 Four hires run one after another on a freshly reset Gitea, `acme-api` at c9d8d7f, between 15:08 and 15:29. Measured with `uv run python tests/acceptance/measure.py`, which reads only Atlas.
 

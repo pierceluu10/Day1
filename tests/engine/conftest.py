@@ -23,7 +23,7 @@ def store(test_settings: Settings) -> Iterator[AtlasStore]:
     try:
         yield store
     finally:
-        # The hackathon user may not dropDatabase; a database with no collections no longer exists.
+        # The Atlas user may not dropDatabase; a database with no collections no longer exists.
         for name in store.db.list_collection_names():
             store.db.drop_collection(name)
         store.close()
