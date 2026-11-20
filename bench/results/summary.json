@@ -8,11 +8,11 @@
     ],
     "memory_off": {
       "runs": 54,
-      "onboarded": 46,
-      "success_rate": 0.8519,
-      "llm_calls": 237,
-      "cost_usd": 2.95,
-      "median_elapsed_s": 138.25,
+      "onboarded": 49,
+      "success_rate": 0.9074,
+      "llm_calls": 220,
+      "cost_usd": 2.62,
+      "median_elapsed_s": 137.3,
       "fixed_from_memory": 0,
       "fixed_by_reasoning": 125,
       "by_stack": {
@@ -20,21 +20,21 @@
         "node": 1.0,
         "python": 0.9167,
         "ruby": 0.75,
-        "rust": 0.0
+        "rust": 1.0
       },
       "by_machine": {
-        "alpine": 0.8333,
-        "debian": 0.8333,
-        "ubuntu": 0.8889
+        "alpine": 0.8889,
+        "debian": 0.8889,
+        "ubuntu": 0.9444
       }
     },
     "memory_on": {
       "runs": 54,
-      "onboarded": 48,
-      "success_rate": 0.8889,
-      "llm_calls": 35,
-      "cost_usd": 0.65,
-      "median_elapsed_s": 141.8,
+      "onboarded": 51,
+      "success_rate": 0.9444,
+      "llm_calls": 18,
+      "cost_usd": 0.36,
+      "median_elapsed_s": 136.7,
       "fixed_from_memory": 126,
       "fixed_by_reasoning": 0,
       "by_stack": {
@@ -42,12 +42,12 @@
         "node": 1.0,
         "python": 0.9167,
         "ruby": 0.9167,
-        "rust": 0.0
+        "rust": 1.0
       },
       "by_machine": {
-        "alpine": 0.8889,
-        "debian": 0.8889,
-        "ubuntu": 0.8889
+        "alpine": 0.9444,
+        "debian": 0.9444,
+        "ubuntu": 0.9444
       }
     },
     "rescued_by_memory": [
@@ -57,12 +57,20 @@
     "failed_both": [
       "redis-py/debian",
       "redis-py/alpine",
-      "campfire/ubuntu",
-      "ripgrep/ubuntu",
-      "ripgrep/debian",
-      "ripgrep/alpine"
+      "campfire/ubuntu"
     ],
     "runs": [
+      {
+        "label": "matrix-off",
+        "repo": "ripgrep",
+        "machine": "ubuntu",
+        "ok": true,
+        "llm_calls": 3,
+        "cost_usd": 0.0237,
+        "elapsed_s": 248.6,
+        "fixed_from_memory": 0,
+        "fixed_by_reasoning": 2
+      },
       {
         "label": "matrix-off",
         "repo": "click",
@@ -87,12 +95,34 @@
       },
       {
         "label": "matrix-off",
+        "repo": "ripgrep",
+        "machine": "debian",
+        "ok": true,
+        "llm_calls": 3,
+        "cost_usd": 0.0239,
+        "elapsed_s": 124.2,
+        "fixed_from_memory": 0,
+        "fixed_by_reasoning": 2
+      },
+      {
+        "label": "matrix-off",
         "repo": "click",
         "machine": "alpine",
         "ok": true,
         "llm_calls": 5,
         "cost_usd": 0.0339,
         "elapsed_s": 50.8,
+        "fixed_from_memory": 0,
+        "fixed_by_reasoning": 2
+      },
+      {
+        "label": "matrix-off",
+        "repo": "ripgrep",
+        "machine": "alpine",
+        "ok": true,
+        "llm_calls": 3,
+        "cost_usd": 0.022,
+        "elapsed_s": 137.2,
         "fixed_from_memory": 0,
         "fixed_by_reasoning": 2
       },
@@ -625,37 +655,15 @@
         "fixed_by_reasoning": 3
       },
       {
-        "label": "matrix-off",
+        "label": "matrix-on",
         "repo": "ripgrep",
         "machine": "ubuntu",
-        "ok": false,
-        "llm_calls": 10,
-        "cost_usd": 0.1828,
-        "elapsed_s": 286.6,
-        "fixed_from_memory": 0,
-        "fixed_by_reasoning": 2
-      },
-      {
-        "label": "matrix-off",
-        "repo": "ripgrep",
-        "machine": "debian",
-        "ok": false,
-        "llm_calls": 9,
-        "cost_usd": 0.1448,
-        "elapsed_s": 207.7,
-        "fixed_from_memory": 0,
-        "fixed_by_reasoning": 2
-      },
-      {
-        "label": "matrix-off",
-        "repo": "ripgrep",
-        "machine": "alpine",
-        "ok": false,
-        "llm_calls": 7,
-        "cost_usd": 0.0723,
-        "elapsed_s": 157.3,
-        "fixed_from_memory": 0,
-        "fixed_by_reasoning": 2
+        "ok": true,
+        "llm_calls": 0,
+        "cost_usd": 0.0,
+        "elapsed_s": 243.7,
+        "fixed_from_memory": 2,
+        "fixed_by_reasoning": 0
       },
       {
         "label": "matrix-on",
@@ -681,12 +689,34 @@
       },
       {
         "label": "matrix-on",
+        "repo": "ripgrep",
+        "machine": "debian",
+        "ok": true,
+        "llm_calls": 0,
+        "cost_usd": 0.0,
+        "elapsed_s": 135.7,
+        "fixed_from_memory": 2,
+        "fixed_by_reasoning": 0
+      },
+      {
+        "label": "matrix-on",
         "repo": "click",
         "machine": "alpine",
         "ok": true,
         "llm_calls": 1,
         "cost_usd": 0.004,
         "elapsed_s": 35.7,
+        "fixed_from_memory": 2,
+        "fixed_by_reasoning": 0
+      },
+      {
+        "label": "matrix-on",
+        "repo": "ripgrep",
+        "machine": "alpine",
+        "ok": true,
+        "llm_calls": 0,
+        "cost_usd": 0.0,
+        "elapsed_s": 116.9,
         "fixed_from_memory": 2,
         "fixed_by_reasoning": 0
       },
@@ -1216,39 +1246,6 @@
         "cost_usd": 0.0,
         "elapsed_s": 91.1,
         "fixed_from_memory": 3,
-        "fixed_by_reasoning": 0
-      },
-      {
-        "label": "matrix-on",
-        "repo": "ripgrep",
-        "machine": "ubuntu",
-        "ok": false,
-        "llm_calls": 5,
-        "cost_usd": 0.0696,
-        "elapsed_s": 205.9,
-        "fixed_from_memory": 2,
-        "fixed_by_reasoning": 0
-      },
-      {
-        "label": "matrix-on",
-        "repo": "ripgrep",
-        "machine": "debian",
-        "ok": false,
-        "llm_calls": 6,
-        "cost_usd": 0.0976,
-        "elapsed_s": 212.6,
-        "fixed_from_memory": 2,
-        "fixed_by_reasoning": 0
-      },
-      {
-        "label": "matrix-on",
-        "repo": "ripgrep",
-        "machine": "alpine",
-        "ok": false,
-        "llm_calls": 6,
-        "cost_usd": 0.1211,
-        "elapsed_s": 197.0,
-        "fixed_from_memory": 2,
         "fixed_by_reasoning": 0
       }
     ]
