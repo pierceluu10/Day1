@@ -34,6 +34,7 @@ class Repo:
     setup: tuple[str, ...]
     ready: str
     test: str
+    module: str  # Python only: the package that must import from the checkout, not from a package index
 
     @classmethod
     def from_manifest(cls, entry: dict[str, object]) -> Repo:
@@ -46,6 +47,7 @@ class Repo:
             setup=tuple(str(command) for command in entry["setup"]),  # type: ignore[union-attr]
             ready=str(entry["ready"]),
             test=str(entry["test"]),
+            module=str(entry.get("module", "")),
         )
 
 
@@ -115,6 +117,19 @@ def build_steps(repo: Repo) -> list[Step]:
                 error_text=f"The project's tracked files must stay unmodified; these were changed: {edited}. "
                 f"Restore them with `git checkout -- <file>` and fix the environment instead.",
             )
+        if repo.module:
+            # Run from the checkout, as the tests import it: a released copy from PyPI would pass the suite
+            # without the project ever being built.
+            probe = f'.venv/bin/python -c "import os, {repo.module}; print(os.path.realpath({repo.module}.__file__))"'
+            located = _exec(ctx, probe, QUICK_TIMEOUT_S, REPO_DIR)
+            if not located.ok or not located.output.strip().startswith(REPO_DIR):
+                return CheckResult(
+                    ok=False,
+                    evidence=f"{repo.module} is not imported from the checkout",
+                    error_text=error_text(located, REPO_DIR)
+                    + f"\n{repo.module} must be built and installed from this checkout (e.g. pip install -e), "
+                    "not a released copy from a package index.",
+                )
         result = _exec(ctx, repo.test, TEST_TIMEOUT_S, REPO_DIR)
         if not result.ok:
             return _failed(result, REPO_DIR, f"tests exit {result.exit_code}")

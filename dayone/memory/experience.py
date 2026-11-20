@@ -73,7 +73,8 @@ tarball) must also be put on PATH for later shells, e.g. by linking its binaries
 Services a step needs (databases, caches) must be started in the background so the command returns.
 For a Python project, its Python is the venv at {REPO_DIR}/.venv: use .venv/bin/python and .venv/bin/pip for
 anything in the project, never the system python or pip.
-Never edit, skip, deselect or delete the project's tests or source to make a check pass."""
+Never edit, skip, deselect or delete the project's tests or source to make a check pass, and build the project
+itself from the checkout (e.g. an editable install), never a released copy from a package index."""
 STRICT_JSON = "Reply with strict JSON and nothing else: "
 
 REASON_SYSTEM = f"""You fix failed setup steps on a new hire's development machine.
