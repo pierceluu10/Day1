@@ -137,6 +137,7 @@ def main() -> None:
                 "vector": filtered,
                 "vector_unfiltered": unfiltered,
                 "vector_rerank": _rerank(http, text, filtered),
+                "vector_unfiltered_rerank": _rerank(http, text, unfiltered),
             }
         )
 
@@ -195,6 +196,10 @@ def main() -> None:
             "vector_unfiltered@0.8": score("vector_unfiltered", PRODUCTION_THRESHOLD),
             "vector_top1_no_threshold": score("vector", None),
             "vector_rerank_top1": score("vector_rerank", None),
+            "vector_unfiltered_rerank_top1": score("vector_unfiltered_rerank", None),
+        },
+        "unfiltered_threshold_sweep": {
+            str(threshold): score("vector_unfiltered", threshold) for threshold in THRESHOLDS
         },
         "threshold_sweep": {str(threshold): score("vector", threshold) for threshold in THRESHOLDS},
         "rerank_threshold_sweep": {str(threshold): score("vector_rerank", threshold) for threshold in rerank_thresholds},

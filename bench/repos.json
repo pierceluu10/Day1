@@ -243,7 +243,7 @@
   {
     "name": "ripgrep",
     "url": "https://github.com/BurntSushi/ripgrep.git",
-    "ref": "e89fff89ac9af12e8d4ce9d5fd07beb408ca730f",
+    "ref": "7525479a9576f1ca4c2d04339d78e47ff5ae9b05",
     "stack": "rust",
     "category": "rust build",
     "setup": [
@@ -251,6 +251,6 @@
     ],
     "ready": "cargo build",
     "test": "cargo test",
-    "why_painful": "Edition 2024 with rust-version 1.85, newer than distro rustc, so it needs rustup plus a C linker."
+    "why_painful": "Edition 2024 with rust-version 1.96, newer than distro rustc, so it needs rustup plus a C linker."
   }
 ]
