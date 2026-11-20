@@ -86,6 +86,8 @@ def curve() -> dict[str, Any]:
         "first_window_mean_llm_calls": round(first_calls, 2),
         "last_window_mean_llm_calls": round(last_calls, 2),
         "llm_call_reduction": round(1 - last_calls / first_calls, 4) if first_calls else 0.0,
+        "first_window_mean_elapsed_s": round(mean(run["elapsed_s"] for run in first), 1),
+        "last_window_mean_elapsed_s": round(mean(run["elapsed_s"] for run in last), 1),
         "total_tokens": sum(run.get("input_tokens", 0) + run.get("output_tokens", 0) for run in runs),
         "per_hire": [
             {key: run.get(key) for key in ("sequence", "repo", "machine", "ok", "llm_calls", "input_tokens", "output_tokens", "cost_usd", "fixed_from_memory", "fixed_by_reasoning", "elapsed_s")}
