@@ -1,4 +1,4 @@
-# Day One
+# Day1
 
 ## What it solves
 
